@@ -1,4 +1,4 @@
-# pworkspaces
+# pmux
 
 Desktop workspace runtime (tiling panes + PTY sessions + IPC). Spec: `spec.md`.
 
@@ -12,7 +12,7 @@ Each terminal session exports:
 | `PW_WORKSPACE_NAME` | Human workspace name |
 | `PW_PANE_ID` | Stable pane id (`pane_…`) |
 | `PW_PANE_NAME` | Human pane name (auto: `caffeinated_turing` style) |
-| `PWORKSPACES_SOCK` | Unix socket for `pwctl` |
+| `PMUX_SOCK` | Unix socket for `pwctl` (`PWORKSPACES_SOCK` alias) |
 
 Use skill `pworkspaces-agent` (`.claude/skills/` / `.cursor/skills/`) or:
 
@@ -30,9 +30,9 @@ Args accept name **or** id.
 Runtime crate (lib + `pwctl`). Desktop UI lives in `ui/egui` (swap later → `ui/<toolkit>`).
 
 ```bash
-cargo build --bin pworkspaces --bin pwctl
-cargo run --bin pworkspaces
-# inside a pane, pwctl is on PATH (next to pworkspaces + ~/.cargo/bin)
+cargo build --bin pmux --bin pwctl
+cargo run --bin pmux
+# inside a pane, pwctl is on PATH (next to pmux + ~/.cargo/bin)
 
 # host shell (optional):
 cargo install --path . --bin pwctl
@@ -43,16 +43,16 @@ Layout:
 
 ```text
 src/           # runtime lib + pwctl
-ui/egui/       # egui/eframe frontend (bin: pworkspaces)
+ui/egui/       # egui/eframe frontend (bin: pmux)
 ```
 
 ## Runtime / attach
 
-Un solo runtime (daemon) en `/tmp/pworkspaces.sock`. UI y `pwctl` son clientes.
+Un solo runtime (daemon) en `/tmp/pmux.sock`. UI y `pwctl` son clientes.
 
 ```bash
 pwctl start              # solo daemon (sin ventana)
-cargo run --bin pworkspaces   # UI: attach; si no hay daemon, lo arranca
+cargo run --bin pmux     # UI: attach; si no hay daemon, lo arranca
 pwctl ping
 pwctl stop               # mata daemon + PTYs
 ```

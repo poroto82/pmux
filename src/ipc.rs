@@ -1,15 +1,27 @@
 //! IPC protocol for external clients (CLI, agents, plugins).
 //!
 //! JSON-based request/response over Unix domain socket.
-//! Socket path: /tmp/pworkspaces.sock (or $PWORKSPACES_SOCK)
+//! Socket path: /tmp/pmux.sock (or $PMUX_SOCK / $PWORKSPACES_SOCK)
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Default socket path.
-pub fn socket_path() -> std::path::PathBuf {
-    std::env::var("PWORKSPACES_SOCK")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/pworkspaces.sock"))
+const DEFAULT_SOCK: &str = "/tmp/pmux.sock";
+const LEGACY_SOCK: &str = "/tmp/pworkspaces.sock";
+
+/// Socket path. Env wins; else new default; else leftover daemon on the old path.
+pub fn socket_path() -> PathBuf {
+    if let Ok(p) = std::env::var("PMUX_SOCK").or_else(|_| std::env::var("PWORKSPACES_SOCK")) {
+        return PathBuf::from(p);
+    }
+    let neu = PathBuf::from(DEFAULT_SOCK);
+    let old = PathBuf::from(LEGACY_SOCK);
+    if !neu.exists() && old.exists() {
+        old
+    } else {
+        neu
+    }
 }
 
 /// Request from client to runtime.

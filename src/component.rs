@@ -515,7 +515,7 @@ impl ComponentRegistry {
 
     // ── Plugin loading from disk ────────────────────────────────────
 
-    /// Load plugin configs from ~/.config/pworkspaces/plugins/*.toml
+    /// Load plugin configs from ~/.config/pmux/plugins/*.toml
     pub fn load_plugins(&mut self) {
         let dir = plugin_dir();
         if !dir.exists() {
@@ -571,8 +571,5 @@ impl std::fmt::Debug for ComponentRegistry {
 }
 
 fn plugin_dir() -> std::path::PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("pworkspaces")
-        .join("plugins")
+    crate::paths::config_dir().join("plugins")
 }

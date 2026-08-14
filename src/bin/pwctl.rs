@@ -1,4 +1,4 @@
-//! CLI client for pworkspaces runtime.
+//! CLI client for pmux runtime.
 //!
 //! Connects to the running runtime via Unix socket and sends commands.
 //!
@@ -73,7 +73,7 @@ fn main() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("cannot connect to runtime at {}: {}", path.display(), e);
-            eprintln!("is the daemon running? (`cargo run --bin pworkspaces` or `pwctl ping`)");
+            eprintln!("is the daemon running? (`cargo run --bin pmux` or `pwctl ping`)");
             std::process::exit(1);
         }
     };
@@ -283,7 +283,7 @@ fn resolve_path(path: &str) -> String {
         .to_string()
 }
 
-/// Start headless runtime (`pworkspaces --daemon`) if ping fails.
+/// Start headless runtime (`pmux --daemon`) if ping fails.
 fn start_daemon() -> Result<String, String> {
     use std::process::{Command, Stdio};
 
@@ -294,8 +294,8 @@ fn start_daemon() -> Result<String, String> {
         ));
     }
 
-    let exe = find_pworkspaces_bin().ok_or(
-        "cannot find `pworkspaces` binary (build with: cargo build --bin pworkspaces)".to_string(),
+    let exe = pworkspaces::paths::find_ui_bin().ok_or(
+        "cannot find `pmux` binary (build with: cargo build --bin pmux)".to_string(),
     )?;
 
     Command::new(&exe)
@@ -391,29 +391,8 @@ fn print_runtime_list() -> Result<(), String> {
     Ok(())
 }
 
-fn find_pworkspaces_bin() -> Option<std::path::PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.parent()?.join("pworkspaces");
-        if sibling.exists() {
-            return Some(sibling);
-        }
-    }
-    which("pworkspaces")
-}
-
-fn which(name: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 fn print_usage() {
-    eprintln!("pwctl — pworkspaces CLI
+    eprintln!("pwctl — pmux CLI
 
 Commands:
   ping                          Health check (daemon up?)
@@ -434,6 +413,6 @@ Commands:
   view [<workspace>] <path>     Preview md/image in view pane
                                 (workspace optional if PW_WORKSPACE_NAME set)
 
-UI: `pworkspaces` attaches (starts daemon if needed).
+UI: `pmux` attaches (starts daemon if needed).
   ✕ / ⌘⇧D detach (keep runtime) · `pwctl stop` kills runtime.");
 }

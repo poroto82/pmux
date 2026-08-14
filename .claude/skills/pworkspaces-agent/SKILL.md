@@ -1,22 +1,22 @@
 ---
 name: pworkspaces-agent
 description: >-
-  Operate pworkspaces panes via pwctl using PW_* environment variables.
-  Use when inside a pworkspaces terminal, when PW_WORKSPACE_ID or PW_PANE_ID
+  Operate pmux panes via pwctl using PW_* environment variables.
+  Use when inside a pmux terminal, when PW_WORKSPACE_ID or PW_PANE_ID
   is set, or when the user asks to send commands to other panes, list panes,
   preview files/URLs, or control the workspace runtime.
 ---
 
-# pworkspaces agent
+# pmux agent
 
-You are running inside a pworkspaces pane. The runtime speaks JSON over a Unix socket; `pwctl` is the CLI.
+You are running inside a pmux pane. The runtime speaks JSON over a Unix socket; `pwctl` is the CLI.
 
 ## Discover context
 
 ```bash
 echo "ws=$PW_WORKSPACE_NAME id=$PW_WORKSPACE_ID"
 echo "pane=$PW_PANE_NAME id=$PW_PANE_ID"
-echo "sock=${PWORKSPACES_SOCK:-/tmp/pworkspaces.sock}"
+echo "sock=${PMUX_SOCK:-${PWORKSPACES_SOCK:-/tmp/pmux.sock}}"
 ```
 
 Prefer names when present; ids always work.
@@ -52,7 +52,7 @@ Workspace/pane args accept **name or id**.
 6. Name panes you create (`--name`) so they stay addressable.
 7. Preview docs/UI with `pwctl view`, not `cat` / dump markdown in a terminal.
 
-Closing the UI detaches; daemon keeps sessions. Reopen `pworkspaces` to reattach.
+Closing the UI detaches; daemon keeps sessions. Reopen `pmux` to reattach.
 
 Frontend lives in `ui/egui` (runtime crate is the repo root).
 

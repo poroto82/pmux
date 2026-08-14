@@ -63,10 +63,10 @@ pub fn ensure_running() -> io::Result<()> {
     ))
 }
 
-/// Foreground daemon loop (`pworkspaces --daemon`).
+/// Foreground daemon loop (`pmux --daemon`).
 pub fn run() -> ! {
     if IpcClient::ping() {
-        eprintln!("pworkspaces daemon already running");
+        eprintln!("pmux daemon already running");
         std::process::exit(0);
     }
 
@@ -99,7 +99,7 @@ pub fn run() -> ! {
         std::process::exit(1);
     }
     eprintln!(
-        "pworkspaces daemon pid={} sock={}",
+        "pmux daemon pid={} sock={}",
         std::process::id(),
         crate::ipc::socket_path().display()
     );
@@ -127,6 +127,6 @@ pub fn run() -> ! {
     }
     let _ = fs::remove_file(crate::ipc::socket_path());
     let _ = fs::remove_file(pid_path());
-    eprintln!("pworkspaces daemon stopped");
+    eprintln!("pmux daemon stopped");
     std::process::exit(0);
 }

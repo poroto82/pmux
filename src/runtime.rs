@@ -1156,6 +1156,7 @@ impl Runtime {
             .insert("PW_WORKSPACE_ID", ws.id.as_str())
             .insert("PW_WORKSPACE_NAME", &ws.name)
             .insert("PW_PANE_ID", pane.id.as_str())
+            .insert("PMUX_SOCK", &sock)
             .insert("PWORKSPACES_SOCK", &sock)
             .insert("PATH", crate::paths::path_with_pwctl());
 

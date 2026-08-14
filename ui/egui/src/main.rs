@@ -12,7 +12,7 @@ use pworkspaces::terminal::TermColor;
 use pworkspaces::view::ViewNav;
 use raw_window_handle::HasWindowHandle;
 
-const APP_TITLE: &str = "poroto-workspace";
+const APP_TITLE: &str = "pmux";
 
 fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--daemon") {
@@ -208,7 +208,7 @@ struct WebOverlay {
 }
 
 const PW_WEBVIEW_JS: &str = r#"
-window.pworkspaces = {
+window.pmux = {
   version: "0.1",
   post(msg) {
     try {
@@ -217,6 +217,7 @@ window.pworkspaces = {
     } catch (e) { console.error(e); }
   }
 };
+window.pworkspaces = window.pmux;
 "#;
 
 /// Kitty-ish chrome: mint active border. Pane fill follows Kitty theme bg.
@@ -341,7 +342,7 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
 
 impl WorkspaceApp {
     fn new() -> Self {
-        let client = IpcClient::connect().expect("connect to pworkspaces daemon");
+        let client = IpcClient::connect().expect("connect to pmux daemon");
         let snap = client.snapshot(None).expect("daemon snapshot");
         let mut components = ComponentRegistry::new();
         components.load_plugins();

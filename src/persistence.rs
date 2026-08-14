@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::ids::WorkspaceId;
 use crate::workspace::{Workspace, WorkspaceRegistry};
@@ -66,9 +66,9 @@ impl PersistenceManager {
         }
     }
 
-    /// Default config path: ~/.config/pworkspaces/
+    /// Default config path: ~/.config/pmux/ (or leftover ~/.config/pworkspaces/).
     pub fn default_path() -> PathBuf {
-        dirs_path()
+        crate::paths::config_dir()
     }
 
     fn workspaces_dir(&self) -> PathBuf {
@@ -208,34 +208,3 @@ impl PersistenceManager {
     }
 }
 
-fn dirs_path() -> PathBuf {
-    if let Some(config) = dirs_config_dir() {
-        config.join("pworkspaces")
-    } else {
-        PathBuf::from(".pworkspaces")
-    }
-}
-
-fn dirs_config_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var("HOME")
-            .ok()
-            .map(|h| Path::new(&h).join(".config"))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::env::var("XDG_CONFIG_HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("HOME").ok().map(|h| Path::new(&h).join(".config")))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA").ok().map(PathBuf::from)
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        None
-    }
-}

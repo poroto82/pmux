@@ -2,11 +2,51 @@
 
 use std::path::PathBuf;
 
-/// `~/.config/pworkspaces` (same base as persistence).
+const APP: &str = "pmux";
+const LEGACY_APP: &str = "pworkspaces";
+
+/// `~/.config/pmux`, or leftover `~/.config/pworkspaces` if that still has data.
 pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".config").join("pworkspaces"))
-        .unwrap_or_else(|| PathBuf::from(".pworkspaces"))
+    let Some(base) = xdg_config_home() else {
+        return pick_dir(PathBuf::from(".pmux"), PathBuf::from(".pworkspaces"));
+    };
+    pick_dir(base.join(APP), base.join(LEGACY_APP))
+}
+
+fn xdg_config_home() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(|h| std::path::Path::new(&h).join(".config"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| std::path::Path::new(&h).join(".config"))
+            })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA").ok().map(PathBuf::from)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        dirs::home_dir().map(|h| h.join(".config"))
+    }
+}
+
+fn pick_dir(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
+    if preferred.exists() || !legacy.exists() {
+        preferred
+    } else {
+        legacy
+    }
 }
 
 /// Directory containing the current executable (`target/debug` when cargo-run).
@@ -14,6 +54,30 @@ pub fn bin_dir() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+}
+
+/// UI binary (`pmux`, or leftover `pworkspaces`).
+pub fn find_ui_bin() -> Option<PathBuf> {
+    if let Some(dir) = bin_dir() {
+        for name in [APP, LEGACY_APP] {
+            let sibling = dir.join(name);
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+    }
+    which(APP).or_else(|| which(LEGACY_APP))
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Ensure `pwctl` exists beside the UI binary.
