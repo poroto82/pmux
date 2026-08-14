@@ -159,6 +159,11 @@ impl TerminalEmulator {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// Wipe emulator state (keep size). Next `process` starts from a blank grid.
+    pub fn reset(&mut self) {
+        *self = Self::new(self.cols, self.lines);
+    }
+
     /// Resize the terminal grid.
     pub fn resize(&mut self, cols: usize, lines: usize) {
         self.cols = cols;
@@ -423,6 +428,16 @@ mod tests {
     }
 
     #[test]
+    fn reset_wipes_grid() {
+        let mut term = TerminalEmulator::new(80, 24);
+        term.process(b"hello");
+        assert_eq!(term.line_text(0), "hello");
+        term.reset();
+        assert_eq!(term.line_text(0), "");
+        term.process(b"bye");
+        assert_eq!(term.line_text(0), "bye");
+    }
+
     fn clear_screen() {
         let mut term = TerminalEmulator::new(80, 24);
         term.process(b"hello\x1b[2J\x1b[H");

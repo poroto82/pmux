@@ -201,6 +201,11 @@ impl TerminalComponent {
         self.emulator.process(bytes);
     }
 
+    /// Blank grid at current size. UI re-hydrates from PTY replay after this.
+    pub fn reset(&mut self) {
+        self.emulator.reset();
+    }
+
     /// Visible screen text (for clipboard fallback).
     pub fn screen_text(&self) -> String {
         self.emulator.screen_text()

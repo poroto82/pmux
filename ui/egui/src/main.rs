@@ -370,7 +370,7 @@ impl WorkspaceApp {
             snap,
             components,
             active_ws: ws_id,
-            status: "⌘⇧D / ✕ detach  ·  pwctl stop mata runtime  ·  ⌘P open".into(),
+            status: "⌘⇧D detach  ·  ⌘⇧R refresh  ·  pwctl stop mata runtime".into(),
             split_borders: Vec::new(),
             dragging_split: None,
             pane_rects: HashMap::new(),
@@ -628,6 +628,10 @@ impl WorkspaceApp {
             self.status = "Detaching — runtime stays (pwctl / reopen UI)".into();
             return;
         }
+        if name == "refresh_terminals" {
+            self.resync_terminals();
+            return;
+        }
         if name == "kill_runtime" {
             self.leave = LeaveMode::Kill;
             let _ = self.client.shutdown();
@@ -685,6 +689,24 @@ impl WorkspaceApp {
                 self.hydrate_pending.insert(id);
             }
         }
+    }
+
+    /// Reset local emulators and re-feed PTY replay (other UIs / desync).
+    fn resync_terminals(&mut self) {
+        let ids: Vec<PaneId> = self
+            .snap
+            .panes
+            .iter()
+            .filter(|p| p.component_type == "terminal")
+            .map(|p| PaneId::from_raw(p.id.clone()))
+            .collect();
+        for id in &ids {
+            if let Some(tc) = self.components.get_terminal_mut(id) {
+                tc.reset();
+            }
+            self.hydrate_pending.insert(id.clone());
+        }
+        self.status = format!("refresh ← replay ({} term)", ids.len());
     }
 
     fn sync_view_sources(&mut self) {
@@ -999,6 +1021,10 @@ impl eframe::App for WorkspaceApp {
                                 }
                                 egui::Key::D => {
                                     pending_action = Some("detach");
+                                    continue;
+                                }
+                                egui::Key::R => {
+                                    pending_action = Some("refresh_terminals");
                                     continue;
                                 }
                                 #[cfg(not(target_os = "macos"))]
@@ -1391,6 +1417,19 @@ impl eframe::App for WorkspaceApp {
 
                         if self.chrome_visible {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("refresh").size(12.0).color(text_dim()),
+                                        )
+                                        .frame(false)
+                                        .sense(egui::Sense::CLICK),
+                                    )
+                                    .on_hover_text("Re-hydrate terminals from runtime (⌘⇧R)")
+                                    .clicked()
+                                {
+                                    tab_action = Some(TabAction::Refresh);
+                                }
                                 ui.label(format!("Panes: {}", pane_count));
                                 if let Some(ref f) = focused {
                                     let name = pane_names.get(f).cloned().unwrap_or_default();
@@ -1441,6 +1480,7 @@ impl eframe::App for WorkspaceApp {
                 }
             }
             Some(TabAction::Create) => self.run_action("new_workspace"),
+            Some(TabAction::Refresh) => self.run_action("refresh_terminals"),
             Some(TabAction::StartRename { id, name }) => {
                 self.renaming_ws = Some(id);
                 self.rename_buf = name;
@@ -2519,6 +2559,7 @@ enum TabAction {
     Create,
     StartRename { id: WorkspaceId, name: String },
     CancelRename,
+    Refresh,
 }
 
 impl Drop for WorkspaceApp {

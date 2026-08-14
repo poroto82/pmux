@@ -825,6 +825,7 @@ impl Runtime {
             "quick_open" => ActionResult::Ok,
             "rename_workspace" => ActionResult::Ok,
             "detach" => ActionResult::Ok,
+            "refresh_terminals" => ActionResult::Ok,
             "kill_runtime" => ActionResult::Ok,
             _ if name.starts_with("new_script:") => {
                 let script = name.trim_start_matches("new_script:");
@@ -1306,6 +1307,11 @@ impl Runtime {
             "detach",
             "Detach UI (keep runtime) — ✕ does the same; pwctl stop kills",
             Some("Ctrl+Shift+D"),
+        );
+        add(
+            "refresh_terminals",
+            "Re-hydrate terminals from runtime replay (second UI / desync)",
+            Some("Ctrl+Shift+R"),
         );
         add(
             "kill_runtime",
