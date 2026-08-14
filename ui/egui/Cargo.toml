@@ -1,5 +1,5 @@
 [package]
-name = "pmux"
+name = "pmux-ui"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,9 +9,14 @@ name = "pmux"
 path = "src/main.rs"
 
 [dependencies]
-pworkspaces = { path = "../.." }
+pmux = { path = "../.." }
 eframe = "0.31"
 egui = "0.31"
 wry = "0.53"
 raw-window-handle = "0.6"
 dirs = "6"
+
+[package.metadata.bundle]
+name = "pmux"
+identifier = "dev.pmux.app"
+icon = ["assets/icon.png"]

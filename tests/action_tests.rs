@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use pworkspaces::action::{ActionArg, ActionContext, ActionRegistry, ActionResult};
-use pworkspaces::ids::{PaneId, WorkspaceId};
+use pmux::action::{ActionArg, ActionContext, ActionRegistry, ActionResult};
+use pmux::ids::{PaneId, WorkspaceId};
 
 fn setup_registry() -> ActionRegistry {
     let mut reg = ActionRegistry::new();

@@ -1,5 +1,5 @@
-use pworkspaces::ids::{PaneId, WorkspaceId};
-use pworkspaces::permission::*;
+use pmux::ids::{PaneId, WorkspaceId};
+use pmux_runtime::permission::*;
 
 // --- PermissionSet ---
 

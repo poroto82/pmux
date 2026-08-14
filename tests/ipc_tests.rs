@@ -1,4 +1,4 @@
-use pworkspaces::ipc::{
+use pmux::ipc::{
     ActionOutcome, PaneSnap, Request, Response, UiSnapshot, WorkspaceTabSnap,
 };
 
@@ -55,7 +55,7 @@ fn snapshot_request_serde() {
 fn poll_ui_request_serde() {
     let json = serde_json::to_string(&Request::PollUi {
         workspace: Some("demo".into()),
-        inputs: vec![pworkspaces::ipc::PollInput {
+        inputs: vec![pmux::ipc::PollInput {
             pane: "pane_1".into(),
             bytes: b"x".to_vec(),
         }],
@@ -92,6 +92,19 @@ fn shutdown_and_send_input_serde() {
     let req: Request = serde_json::from_str(&send).unwrap();
     match req {
         Request::SendInput { bytes, .. } => assert_eq!(bytes, b"ls\n"),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn auth_request_serde() {
+    let json = serde_json::to_string(&Request::Auth {
+        token: "abc".into(),
+    })
+    .unwrap();
+    let req: Request = serde_json::from_str(&json).unwrap();
+    match req {
+        Request::Auth { token } => assert_eq!(token, "abc"),
         other => panic!("unexpected {other:?}"),
     }
 }

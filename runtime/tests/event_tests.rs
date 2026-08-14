@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use pworkspaces::event::{Event, EventBus, EventKind};
-use pworkspaces::ids::{PaneId, SessionId, WorkspaceId};
+use pmux_runtime::event::{Event, EventBus, EventKind};
+use pmux::ids::{PaneId, SessionId, WorkspaceId};
 
 #[test]
 fn subscribe_and_emit() {

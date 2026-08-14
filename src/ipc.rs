@@ -1,7 +1,9 @@
 //! IPC protocol for external clients (CLI, agents, plugins).
 //!
-//! JSON-based request/response over Unix domain socket.
-//! Socket path: /tmp/pmux.sock (or $PMUX_SOCK / $PWORKSPACES_SOCK)
+//! JSON-based request/response over Unix domain socket or TCP.
+//! Socket path: /tmp/pmux.sock (or $PMUX_SOCK).
+//! Also accepts leftover $PWORKSPACES_SOCK / /tmp/pworkspaces.sock.
+//! TCP: $PMUX_LISTEN / pmux.toml `listen` (default 0.0.0.0:7878). Client: $PMUX_HOST.
 
 use std::path::PathBuf;
 
@@ -9,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_SOCK: &str = "/tmp/pmux.sock";
 const LEGACY_SOCK: &str = "/tmp/pworkspaces.sock";
+pub const DEFAULT_TCP: &str = "0.0.0.0:7878";
+pub const DEFAULT_TCP_PORT: u16 = 7878;
 
 /// Socket path. Env wins; else new default; else leftover daemon on the old path.
 pub fn socket_path() -> PathBuf {
@@ -22,6 +26,57 @@ pub fn socket_path() -> PathBuf {
     } else {
         neu
     }
+}
+
+/// Bind address for LAN TCP. `None` = unix only.
+pub fn tcp_listen_addr() -> Option<String> {
+    if let Ok(v) = std::env::var("PMUX_LISTEN") {
+        return parse_listen(&v);
+    }
+    if let Some(v) = toml_str("listen") {
+        return parse_listen(&v);
+    }
+    Some(DEFAULT_TCP.into())
+}
+
+/// Client TCP target (`host:port`). Unix sock if unset.
+pub fn tcp_connect_addr() -> Option<String> {
+    let v = std::env::var("PMUX_HOST").ok()?;
+    parse_listen(&v)
+}
+
+pub(crate) fn parse_listen(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    if v.is_empty()
+        || v.eq_ignore_ascii_case("off")
+        || v.eq_ignore_ascii_case("none")
+        || v.eq_ignore_ascii_case("false")
+    {
+        return None;
+    }
+    if v.contains(']') {
+        return Some(v.to_string());
+    }
+    if let Some((_, port)) = v.rsplit_once(':') {
+        if port.parse::<u16>().is_ok() {
+            return Some(v.to_string());
+        }
+    }
+    Some(format!("{v}:{DEFAULT_TCP_PORT}"))
+}
+
+fn toml_str(key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(crate::paths::config_file()).ok()?;
+    for raw in text.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        let rest = line.strip_prefix(key)?;
+        let rest = rest.trim().strip_prefix('=')?.trim();
+        let val = rest.trim_matches('"').trim_matches('\'').trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
+        }
+    }
+    None
 }
 
 /// Request from client to runtime.
@@ -103,6 +158,9 @@ pub enum Request {
 
     /// Ping — health check.
     Ping,
+
+    /// First message on TCP. Unix socket does not require this.
+    Auth { token: String },
 
     /// Full UI snapshot for the active (or named) workspace.
     Snapshot {
@@ -355,4 +413,17 @@ pub fn write_message<W: std::io::Write>(writer: &mut W, msg: &str) -> std::io::R
     writer.write_all(msg.as_bytes())?;
     writer.write_all(b"\n")?;
     writer.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_listen_off() {
+        assert!(parse_listen("off").is_none());
+        assert!(parse_listen("none").is_none());
+        assert_eq!(parse_listen("10.0.0.5").as_deref(), Some("10.0.0.5:7878"));
+        assert_eq!(parse_listen("10.0.0.5:9000").as_deref(), Some("10.0.0.5:9000"));
+    }
 }

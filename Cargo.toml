@@ -1,11 +1,11 @@
 [workspace]
-members = [".", "ui/egui"]
-# Runtime only. UI: `cargo build -p pmux`
-default-members = ["."]
+members = [".", "runtime", "ui/egui"]
+# Lib + pwctl. Window: `cargo pmux` / `cargo build -p pmux-ui`
+default-members = [".", "runtime"]
 resolver = "2"
 
 [package]
-name = "pworkspaces"
+name = "pmux"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,13 +13,11 @@ edition = "2021"
 ulid = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-portable-pty = "0.8"
 alacritty_terminal = "0.26"
 dirs = "6"
 toml = "0.8"
 pulldown-cmark = "0.13"
 url = "2"
 
-[[bin]]
-name = "pwctl"
-path = "src/bin/pwctl.rs"
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

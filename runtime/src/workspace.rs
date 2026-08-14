@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ComponentId, PaneId, WorkspaceId};
-use crate::layout::{Direction, LayoutTree};
+use pmux::ids::{ComponentId, PaneId, WorkspaceId};
+use pmux::layout::{Direction, LayoutTree};
+
 use crate::names;
 use crate::pane::Pane;
 

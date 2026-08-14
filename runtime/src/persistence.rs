@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::ids::WorkspaceId;
+use pmux::ids::WorkspaceId;
+
 use crate::workspace::{Workspace, WorkspaceRegistry};
 
 /// Manages saving/restoring workspaces to disk.
@@ -68,7 +69,7 @@ impl PersistenceManager {
 
     /// Default config path: ~/.config/pmux/ (or leftover ~/.config/pworkspaces/).
     pub fn default_path() -> PathBuf {
-        crate::paths::config_dir()
+        pmux::paths::config_dir()
     }
 
     fn workspaces_dir(&self) -> PathBuf {

@@ -1,16 +1,20 @@
-//! IPC server — listens on Unix socket, dispatches requests to Runtime.
+//! IPC server — Unix socket + optional LAN TCP (token required).
 
+use std::io::{BufRead, Write};
+use std::net::TcpListener;
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::action::{ActionContext, ActionResult};
-use crate::ids::ComponentId;
-use crate::ipc::{
+use pmux::action::{ActionContext, ActionResult};
+use pmux::ids::ComponentId;
+use pmux::ipc::{
     self, ActionOutcome, PaneInfo, Request, Response, StatusInfo, WorkspaceInfo,
 };
-use crate::layout::Direction;
+use pmux::layout::Direction;
+use pmux::token;
+
 use crate::runtime::Runtime;
 
 /// Start the IPC server on a background thread.
@@ -25,19 +29,23 @@ pub fn start_with_shutdown(
 ) -> std::io::Result<std::path::PathBuf> {
     let path = ipc::socket_path();
 
-    // Remove stale socket
     let _ = std::fs::remove_file(&path);
 
     let listener = UnixListener::bind(&path)?;
     let path_clone = path.clone();
 
+    let rt_u = runtime.clone();
+    let sd_u = shutdown.clone();
     thread::spawn(move || {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let rt = runtime.clone();
-                    let sd = shutdown.clone();
-                    thread::spawn(move || handle_connection(rt, sd, stream));
+                    let rt = rt_u.clone();
+                    let sd = sd_u.clone();
+                    thread::spawn(move || {
+                        let reader = stream.try_clone().unwrap();
+                        handle_rpc_loop(rt, sd, std::io::BufReader::new(reader), stream);
+                    });
                 }
                 Err(e) => {
                     eprintln!("ipc accept error: {}", e);
@@ -46,18 +54,88 @@ pub fn start_with_shutdown(
         }
     });
 
+    if let Some(addr) = ipc::tcp_listen_addr() {
+        match TcpListener::bind(&addr) {
+            Ok(tcp) => {
+                let token = Arc::new(token::ensure(false)?);
+                eprintln!("pmux tcp listen={addr} (token required)");
+                let rt_t = runtime;
+                let sd_t = shutdown;
+                thread::spawn(move || {
+                    for stream in tcp.incoming() {
+                        match stream {
+                            Ok(stream) => {
+                                let _ = stream.set_nodelay(true);
+                                let rt = rt_t.clone();
+                                let sd = sd_t.clone();
+                                let tok = token.clone();
+                                thread::spawn(move || handle_tcp(rt, sd, stream, tok));
+                            }
+                            Err(e) => eprintln!("tcp accept error: {e}"),
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                eprintln!("tcp bind {addr} failed: {e} (unix socket still up)");
+            }
+        }
+    }
+
     Ok(path_clone)
 }
 
-fn handle_connection(
+fn handle_tcp(
     runtime: Arc<Mutex<Runtime>>,
     shutdown: Option<Arc<AtomicBool>>,
-    stream: std::os::unix::net::UnixStream,
+    stream: std::net::TcpStream,
+    expected: Arc<String>,
 ) {
-    let reader = stream.try_clone().unwrap();
-    let mut writer = stream;
+    let reader = match stream.try_clone() {
+        Ok(r) => r,
+        Err(_) => return,
+    };
     let mut buf_reader = std::io::BufReader::new(reader);
+    let mut writer = stream;
 
+    let line = match ipc::read_message(&mut buf_reader) {
+        Ok(line) if !line.is_empty() => line,
+        _ => return,
+    };
+    let request: Request = match serde_json::from_str(&line) {
+        Ok(r) => r,
+        Err(_) => {
+            let resp = Response::error("unauthorized");
+            let _ = ipc::write_message(&mut writer, &serde_json::to_string(&resp).unwrap());
+            return;
+        }
+    };
+    match request {
+        Request::Auth { token } if token::eq(&token, expected.as_str()) => {
+            let resp = Response::ok();
+            if ipc::write_message(&mut writer, &serde_json::to_string(&resp).unwrap()).is_err() {
+                return;
+            }
+        }
+        _ => {
+            let resp = Response::error("unauthorized");
+            let _ = ipc::write_message(&mut writer, &serde_json::to_string(&resp).unwrap());
+            return;
+        }
+    }
+
+    handle_rpc_loop(runtime, shutdown, buf_reader, writer);
+}
+
+fn handle_rpc_loop<R, W>(
+    runtime: Arc<Mutex<Runtime>>,
+    shutdown: Option<Arc<AtomicBool>>,
+    mut buf_reader: R,
+    mut writer: W,
+) where
+    R: BufRead,
+    W: Write,
+{
     loop {
         let line = match ipc::read_message(&mut buf_reader) {
             Ok(line) if line.is_empty() => break,
@@ -89,6 +167,8 @@ fn handle_connection(
 fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Response {
     match req {
         Request::Ping => Response::ok_data("pong"),
+
+        Request::Auth { .. } => Response::ok(),
 
         Request::Status => Response::ok_data(StatusInfo {
             workspaces: rt.workspaces.count(),
@@ -149,7 +229,7 @@ fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Re
             };
             let ws_id = ws.id.clone();
             let focused = ws.layout().focused().cloned();
-            let pane_snapshots: Vec<(String, Option<String>, crate::ids::PaneId)> = ws
+            let pane_snapshots: Vec<(String, Option<String>, pmux::ids::PaneId)> = ws
                 .panes()
                 .map(|p| (p.id.to_string(), p.name.clone(), p.id.clone()))
                 .collect();
@@ -439,7 +519,7 @@ fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Re
                 Ok(id) => id,
                 Err(resp) => return resp,
             };
-            let pane_id = pane.as_deref().map(crate::ids::PaneId::from_raw);
+            let pane_id = pane.as_deref().map(pmux::ids::PaneId::from_raw);
             let root = rt.quick_open_root(&ws_id, pane_id.as_ref());
             Response::ok_data(serde_json::json!({ "root": root.display().to_string() }))
         }
@@ -449,8 +529,8 @@ fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Re
                 Ok(id) => id,
                 Err(resp) => return resp,
             };
-            let a = crate::ids::PaneId::from_raw(a);
-            let b = crate::ids::PaneId::from_raw(b);
+            let a = pmux::ids::PaneId::from_raw(a);
+            let b = pmux::ids::PaneId::from_raw(b);
             if rt.swap_panes(&ws_id, &a, &b) {
                 Response::ok()
             } else {
@@ -516,7 +596,7 @@ fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Re
 fn resolve_ws(
     rt: &Runtime,
     key: &str,
-) -> Result<crate::ids::WorkspaceId, Response> {
+) -> Result<pmux::ids::WorkspaceId, Response> {
     rt.workspaces
         .resolve_workspace(key)
         .map(|w| w.id.clone())
@@ -528,7 +608,7 @@ fn resolve_pane(
     rt: &Runtime,
     workspace_key: &str,
     pane_key: &str,
-) -> Result<(crate::ids::WorkspaceId, crate::ids::PaneId), Response> {
+) -> Result<(pmux::ids::WorkspaceId, pmux::ids::PaneId), Response> {
     let (ws, pane) = rt
         .workspaces
         .resolve(workspace_key, pane_key)

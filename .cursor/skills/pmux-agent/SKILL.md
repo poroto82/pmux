@@ -1,5 +1,5 @@
 ---
-name: pworkspaces-agent
+name: pmux-agent
 description: >-
   Operate pmux panes via pwctl using PW_* environment variables.
   Use when inside a pmux terminal, when PW_WORKSPACE_ID or PW_PANE_ID
@@ -16,7 +16,7 @@ You are running inside a pmux pane. The runtime speaks JSON over a Unix socket; 
 ```bash
 echo "ws=$PW_WORKSPACE_NAME id=$PW_WORKSPACE_ID"
 echo "pane=$PW_PANE_NAME id=$PW_PANE_ID"
-echo "sock=${PMUX_SOCK:-${PWORKSPACES_SOCK:-/tmp/pmux.sock}}"
+echo "sock=${PMUX_SOCK:-/tmp/pmux.sock}"
 ```
 
 Prefer names when present; ids always work.
@@ -54,7 +54,7 @@ Workspace/pane args accept **name or id**.
 
 Closing the UI detaches; daemon keeps sessions. Reopen `pmux` to reattach.
 
-Frontend lives in `ui/egui` (runtime crate is the repo root).
+Crates: `pmux` (lib), `pmux-runtime` (`pwctl`), `pmux-ui` (bin `pmux`).
 
 ## Typical layout
 

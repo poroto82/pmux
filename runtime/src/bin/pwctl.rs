@@ -17,16 +17,16 @@
 //!   pwctl focus <workspace> <pane>
 //!   pwctl ping
 
-use std::io::{BufRead, BufReader};
-use std::os::unix::net::UnixStream;
-
-use pworkspaces::ipc::{self, PaneInfo, Request, Response, StatusInfo, WorkspaceInfo};
+use pmux::attach;
+use pmux::ipc::{self, PaneInfo, Request, Response, StatusInfo, WorkspaceInfo};
+use pmux::ipc_client::IpcClient;
+use pmux::token;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.iter().any(|a| a == "--daemon") {
-        pworkspaces::daemon::run();
+        pmux_runtime::daemon::run();
     }
 
     if args.is_empty() {
@@ -36,8 +36,29 @@ fn main() {
 
     match args[0].as_str() {
         "start" => {
-            match start_daemon() {
+            let rotate = args.iter().any(|a| a == "--rotate");
+            match start_daemon(rotate) {
                 Ok(msg) => println!("{msg}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        "token" => {
+            let rotate = args.iter().any(|a| a == "--rotate");
+            if rotate && IpcClient::ping() {
+                eprintln!("error: runtime is up — pwctl stop then start --rotate");
+                std::process::exit(1);
+            }
+            match token::ensure(rotate) {
+                Ok(t) => {
+                    println!("{}", t);
+                    if rotate {
+                        eprintln!("wrote {}", token::token_path().display());
+                    }
+                }
                 Err(e) => {
                     eprintln!("error: {e}");
                     std::process::exit(1);
@@ -72,29 +93,19 @@ fn main() {
         }
     };
 
-    let path = ipc::socket_path();
-    let stream = match UnixStream::connect(&path) {
-        Ok(s) => s,
+    let client = match IpcClient::connect() {
+        Ok(c) => c,
         Err(e) => {
-            eprintln!("cannot connect to runtime at {}: {}", path.display(), e);
+            eprintln!("cannot connect to runtime: {e}");
             eprintln!("is the daemon running? (`pwctl start` or `pwctl ping`)");
             std::process::exit(1);
         }
     };
 
-    let mut writer = stream.try_clone().unwrap();
-    let mut reader = BufReader::new(stream);
-
-    let json = serde_json::to_string(&request).unwrap();
-    ipc::write_message(&mut writer, &json).unwrap();
-
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line).unwrap();
-
-    let response: Response = match serde_json::from_str(&response_line) {
+    let response = match client.request(request) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("invalid response: {}", e);
+            eprintln!("error: {e}");
             std::process::exit(1);
         }
     };
@@ -288,32 +299,34 @@ fn resolve_path(path: &str) -> String {
 }
 
 /// Start headless runtime (`pwctl --daemon`) if ping fails.
-fn start_daemon() -> Result<String, String> {
+fn start_daemon(rotate: bool) -> Result<String, String> {
     let already = ping_ok();
-    pworkspaces::daemon::ensure_running().map_err(|e| e.to_string())?;
-    Ok(format!(
+    if already && rotate {
+        return Err("runtime already up — pwctl stop then start --rotate".into());
+    }
+    let token = token::ensure(rotate).map_err(|e| e.to_string())?;
+    attach::ensure_running().map_err(|e| e.to_string())?;
+    let sock = ipc::socket_path();
+    let mut out = format!(
         "{} ({})",
         if already { "already running" } else { "started" },
-        ipc::socket_path().display()
-    ))
+        sock.display()
+    );
+    if let Some(addr) = ipc::tcp_listen_addr() {
+        out.push_str(&format!("\nlisten: {addr}  (LAN TCP, token required)"));
+    }
+    out.push_str(&format!("\ntoken:  {token}"));
+    out.push_str(&format!("\nfile:   {}", token::token_path().display()));
+    Ok(out)
 }
 
 fn ping_ok() -> bool {
-    matches!(rpc(Request::Ping), Ok(Response::Ok { .. }))
+    IpcClient::ping()
 }
 
 fn rpc(req: Request) -> Result<Response, String> {
-    let mut stream = UnixStream::connect(ipc::socket_path()).map_err(|e| e.to_string())?;
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(4)));
-    let json = serde_json::to_string(&req).unwrap();
-    ipc::write_message(&mut stream, &json).map_err(|e| e.to_string())?;
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line).map_err(|e| e.to_string())?;
-    if line.is_empty() {
-        return Err("empty response".into());
-    }
-    serde_json::from_str(&line).map_err(|e| e.to_string())
+    let client = IpcClient::connect().map_err(|e| e.to_string())?;
+    client.request(req).map_err(|e| e.to_string())
 }
 
 fn rpc_data<T: serde::de::DeserializeOwned>(req: Request) -> Result<T, String> {
@@ -335,7 +348,7 @@ fn print_runtime_list() -> Result<(), String> {
         return Ok(());
     }
 
-    let pid = std::fs::read_to_string(pworkspaces::daemon::pid_path())
+    let pid = std::fs::read_to_string(attach::pid_path())
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -346,6 +359,9 @@ fn print_runtime_list() -> Result<(), String> {
     println!("runtime: up");
     println!("pid:     {pid}");
     println!("socket:  {}  (one sock, all workspaces)", sock.display());
+    if let Some(addr) = ipc::tcp_listen_addr() {
+        println!("listen:  {addr}  (TCP, token)");
+    }
     println!(
         "counts:  {} workspace(s)  {} session(s)",
         status.workspaces, status.sessions
@@ -376,7 +392,8 @@ fn print_usage() {
 
 Commands:
   ping                          Health check (daemon up?)
-  start                         Start daemon if not running (no UI)
+  start [--rotate]              Start daemon; print LAN token (rotate = new token)
+  token [--rotate]              Show (or regenerate) LAN token
   stop | shutdown               Stop daemon + kill all sessions
   list                          Runtime + workspaces + panes (what's alive)
   status                        Runtime counts (JSON)

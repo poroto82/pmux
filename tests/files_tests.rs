@@ -1,9 +1,9 @@
 use std::fs;
 
-use pworkspaces::files;
+use pmux::files;
 
 fn temp_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pworkspaces_files_{}", ulid::Ulid::new()));
+    let dir = std::env::temp_dir().join(format!("pmux_files_{}", ulid::Ulid::new()));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -27,7 +27,7 @@ fn list_skips_git_target_and_hidden_dirs() {
     touch(&dir, "spec.md");
     touch(&dir, "src/files.rs");
     touch(&dir, ".git/HEAD");
-    touch(&dir, "target/debug/pworkspaces");
+    touch(&dir, "target/debug/pmux");
     touch(&dir, "node_modules/pkg/index.js");
     touch(&dir, ".github/workflows/ci.yml");
     touch(&dir, ".cache/x");

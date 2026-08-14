@@ -6,7 +6,7 @@ use std::thread;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
-use crate::ids::SessionId;
+use pmux::ids::SessionId;
 
 /// Session state.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

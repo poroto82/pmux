@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::Duration;
 
-use pworkspaces::session::{Session, SessionRegistry, SessionState};
+use pmux_runtime::session::{Session, SessionRegistry, SessionState};
 
 fn wait_for_output(session: &Session, timeout_ms: u64) -> Vec<u8> {
     let start = std::time::Instant::now();
@@ -17,7 +17,7 @@ fn wait_for_output(session: &Session, timeout_ms: u64) -> Vec<u8> {
     }
 }
 
-fn wait_for_output_reg(reg: &SessionRegistry, id: &pworkspaces::ids::SessionId, timeout_ms: u64) -> Vec<u8> {
+fn wait_for_output_reg(reg: &SessionRegistry, id: &pmux::ids::SessionId, timeout_ms: u64) -> Vec<u8> {
     let start = std::time::Instant::now();
     loop {
         let session = reg.get(id).unwrap();
@@ -41,7 +41,7 @@ fn spawn_session() {
 
 #[test]
 fn spawn_with_pw_env() {
-    use pworkspaces::session::SessionSpawnEnv;
+    use pmux_runtime::session::SessionSpawnEnv;
 
     let env = SessionSpawnEnv::new()
         .insert("PW_WORKSPACE_NAME", "backend")
@@ -76,14 +76,14 @@ fn send_command_and_read_output() {
     wait_for_output(&session, 2000);
     session.read_output(); // drain prompt
 
-    session.send_command("echo HELLO_PWORKSPACES").unwrap();
+    session.send_command("echo HELLO_PMUX").unwrap();
     thread::sleep(Duration::from_millis(500));
 
     let output = session.read_output();
     let text = String::from_utf8_lossy(&output);
     assert!(
-        text.contains("HELLO_PWORKSPACES"),
-        "expected HELLO_PWORKSPACES in output, got: {}",
+        text.contains("HELLO_PMUX"),
+        "expected HELLO_PMUX in output, got: {}",
         text
     );
 }
@@ -158,7 +158,7 @@ fn replay_survives_drain() {
 #[test]
 fn strip_zsh_eol_mark_line() {
     let raw = b"ls\nfile\n%\n~/dev \xE2\x9D\xAF\n";
-    let out = pworkspaces::session::strip_zsh_eol_marks(raw);
+    let out = pmux_runtime::session::strip_zsh_eol_marks(raw);
     let s = String::from_utf8_lossy(&out);
     assert!(!s.lines().any(|l| l.trim() == "%"), "got {s:?}");
     assert!(s.contains("ls"), "got {s:?}");
@@ -167,7 +167,7 @@ fn strip_zsh_eol_mark_line() {
 #[test]
 fn trim_replay_skips_partial_first_line() {
     let raw = b"ial\nprompt %\nls\nfile\n";
-    let trimmed = pworkspaces::session::trim_replay(raw);
+    let trimmed = pmux_runtime::session::trim_replay(raw);
     let s = String::from_utf8_lossy(&trimmed);
     assert!(!s.starts_with("ial"), "got {s:?}");
     assert!(s.contains("ls"), "got {s:?}");
@@ -237,7 +237,7 @@ fn registry_multiple_sessions() {
 #[test]
 fn registry_send_to_nonexistent() {
     let mut reg = SessionRegistry::new();
-    let fake = pworkspaces::ids::SessionId::new();
+    let fake = pmux::ids::SessionId::new();
 
     let result = reg.send_command(&fake, "test");
     assert!(result.is_err());

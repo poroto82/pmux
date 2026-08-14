@@ -33,7 +33,11 @@ pub fn ensure_config_scaffold() {
          # theme = ~/path/to.conf\n\
          #\n\
          # Or set $PMUX_THEME. Copy themes/caffeine.conf → theme.conf to tweak.\n\
-         theme = \"caffeine\"\n",
+         theme = \"caffeine\"\n\
+         #\n\
+         # LAN TCP (token required). off = unix socket only.\n\
+         # listen = \"0.0.0.0:7878\"\n\
+         # listen = \"off\"\n",
     );
 }
 
@@ -129,11 +133,11 @@ fn which(name: &str) -> Option<PathBuf> {
 }
 
 /// Ensure `pwctl` exists beside the UI binary.
-/// Rebuild only if missing, or if `src/bin/pwctl.rs` is newer than the binary.
+/// Rebuild only if missing, or if `runtime/src/bin/pwctl.rs` is newer than the binary.
 pub fn ensure_pwctl_built() {
     let Some(dir) = bin_dir() else { return };
     let pwctl = dir.join("pwctl");
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/bin/pwctl.rs");
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/src/bin/pwctl.rs");
     let src_mtime = src.metadata().ok().and_then(|m| m.modified().ok());
     let pwctl_mtime = pwctl.metadata().ok().and_then(|m| m.modified().ok());
     let stale = match (pwctl_mtime, src_mtime) {
@@ -155,7 +159,7 @@ pub fn ensure_pwctl_built() {
         }
         Ok(_) | Err(_) => {
             eprintln!(
-                "could not build pwctl. run: cargo build --bin pwctl && cargo install --path . --bin pwctl"
+                "could not build pwctl. run: cargo build --bin pwctl && cargo install --path runtime --bin pwctl"
             );
         }
     }

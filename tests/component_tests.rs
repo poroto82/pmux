@@ -1,5 +1,5 @@
-use pworkspaces::component::*;
-use pworkspaces::ids::PaneId;
+use pmux::component::*;
+use pmux::ids::PaneId;
 
 #[test]
 fn terminal_component_basics() {

@@ -1,5 +1,5 @@
-use pworkspaces::ids::ComponentId;
-use pworkspaces::workspace::{Workspace, WorkspaceRegistry};
+use pmux::ids::ComponentId;
+use pmux_runtime::workspace::{Workspace, WorkspaceRegistry};
 
 fn comp() -> ComponentId {
     ComponentId::new()
@@ -326,7 +326,7 @@ fn full_workflow() {
     ws.focus(&tests);
     let ports = ws.split(
         Some(&tests),
-        pworkspaces::layout::Direction::Vertical,
+        pmux::layout::Direction::Vertical,
         comp(),
         Some("ports".into()),
     )

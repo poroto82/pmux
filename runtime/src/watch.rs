@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use crate::monitor::{self, ListenPort, MonitorError};
+use pmux::monitor::{self, ListenPort, MonitorError};
 
 const PORT_INTERVAL: Duration = Duration::from_secs(2);
 

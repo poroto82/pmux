@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ids::{PaneId, WorkspaceId};
+use pmux::ids::{PaneId, WorkspaceId};
 
 /// Scope of access (spec §34).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

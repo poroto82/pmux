@@ -2,48 +2,48 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use eframe::egui;
-use pworkspaces::action::ActionInfo;
-use pworkspaces::component::{Component, ComponentInput, ComponentRegistry, RenderOutput};
-use pworkspaces::ids::{PaneId, WorkspaceId};
-use pworkspaces::ipc::{PaneSnap, UiSnapshot};
-use pworkspaces::ipc_client::{IpcClient, IpcPump};
-use pworkspaces::layout::LayoutNode;
-use pworkspaces::palette;
-use pworkspaces::terminal::TermColor;
-use pworkspaces::view::ViewNav;
+use pmux::action::ActionInfo;
+use pmux::component::{Component, ComponentInput, ComponentRegistry, RenderOutput};
+use pmux::ids::{PaneId, WorkspaceId};
+use pmux::ipc::{PaneSnap, UiSnapshot};
+use pmux::ipc_client::{IpcClient, IpcPump};
+use pmux::layout::LayoutNode;
+use pmux::palette;
+use pmux::terminal::TermColor;
+use pmux::view::ViewNav;
 use raw_window_handle::HasWindowHandle;
 
 const APP_TITLE: &str = "pmux";
 
 fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--daemon") {
-        pworkspaces::daemon::run();
+        eprintln!("pmux is the UI. start the runtime with: pwctl start");
+        std::process::exit(1);
     }
 
-    pworkspaces::paths::ensure_config_scaffold();
+    pmux::paths::ensure_config_scaffold();
 
-    pworkspaces::paths::ensure_pwctl_built();
-    let already = pworkspaces::ipc_client::IpcClient::ping();
-    if let Err(e) = pworkspaces::daemon::ensure_running() {
+    pmux::paths::ensure_pwctl_built();
+    let already = pmux::ipc_client::IpcClient::ping();
+    if let Err(e) = pmux::attach::ensure_running() {
         eprintln!("cannot start runtime daemon: {e}");
         std::process::exit(1);
     }
+    let target = pmux::ipc::tcp_connect_addr()
+        .unwrap_or_else(|| pmux::ipc::socket_path().display().to_string());
     if already {
-        eprintln!(
-            "UI attach → {} (runtime already up)",
-            pworkspaces::ipc::socket_path().display()
-        );
+        eprintln!("UI attach → {target} (runtime already up)");
     } else {
-        eprintln!(
-            "UI attach → {} (started runtime)",
-            pworkspaces::ipc::socket_path().display()
-        );
+        eprintln!("UI attach → {target} (started runtime)");
     }
 
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+        .expect("pmux icon");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 840.0])
             .with_title(APP_TITLE)
+            .with_icon(icon)
             // macOS: paint behind traffic lights so titlebar matches window bg.
             .with_fullsize_content_view(true)
             .with_title_shown(false)
@@ -127,7 +127,7 @@ struct SplitBorder {
     /// Parent rect that contains both children.
     parent_rect: egui::Rect,
     /// Direction of the split (Horizontal = vertical divider, Vertical = horizontal divider).
-    direction: pworkspaces::layout::Direction,
+    direction: pmux::layout::Direction,
     /// Depth-first index of this split in the layout tree.
     split_index: usize,
 }
@@ -178,6 +178,7 @@ struct WorkspaceApp {
     leave: LeaveMode,
     /// Terminals waiting to replay PTY at the real pane size (avoids zsh `%` reflow).
     hydrate_pending: HashSet<PaneId>,
+    hydrate_inflight: HashSet<PaneId>,
     /// View pane slots collected this frame (native WebView overlay).
     view_slots: HashMap<PaneId, ViewSlot>,
     overlays: HashMap<PaneId, WebOverlay>,
@@ -227,7 +228,6 @@ window.pmux = {
     } catch (e) { console.error(e); }
   }
 };
-window.pworkspaces = window.pmux;
 "#;
 
 /// Kitty-ish chrome: borders follow the loaded theme.
@@ -351,7 +351,7 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
         egui::Key::PageUp => Some(b"\x1b[5~".to_vec()),
         egui::Key::PageDown => Some(b"\x1b[6~".to_vec()),
         egui::Key::Insert => Some(b"\x1b[2~".to_vec()),
-        egui::Key::Space => Some(b" ".to_vec()),
+        // Space/letters come as Event::Text — mapping them here doubles input.
         _ => None,
     }
 }
@@ -415,6 +415,7 @@ impl WorkspaceApp {
             want_close: false,
             leave: LeaveMode::Running,
             hydrate_pending,
+            hydrate_inflight: HashSet::new(),
             view_slots: HashMap::new(),
             overlays: HashMap::new(),
         }
@@ -474,24 +475,6 @@ fn install_pane_component(components: &mut ComponentRegistry, pane: &PaneSnap) {
     }
 }
 
-fn hydrate_terminal(
-    client: &IpcClient,
-    components: &mut ComponentRegistry,
-    ws: &str,
-    pane_id: &str,
-) {
-    if let Ok(hist) = client.read_replay(ws, pane_id) {
-        if !hist.is_empty() {
-            let id = PaneId::from_raw(pane_id);
-            if let Some(term) = components.get_terminal_mut(&id) {
-                term.process(&hist);
-            }
-        }
-    }
-    // Unread was already included in replay — drop so poll_outputs does not double-print.
-    let _ = client.read_output(ws, pane_id);
-}
-
 impl WorkspaceApp {
     fn pull_pump(&mut self) {
         let snap = self.pump.take_snap();
@@ -499,6 +482,16 @@ impl WorkspaceApp {
             self.active_ws = WorkspaceId::from_raw(id);
         }
         self.snap = snap;
+        for (pane, data) in self.pump.take_hydrates() {
+            let id = PaneId::from_raw(pane);
+            if let Some(comp) = self.components.get_terminal_mut(&id) {
+                if !data.is_empty() {
+                    comp.process(&data);
+                }
+            }
+            self.hydrate_pending.remove(&id);
+            self.hydrate_inflight.remove(&id);
+        }
         for (pane, data) in self.pump.take_outputs() {
             let id = PaneId::from_raw(pane);
             if self.hydrate_pending.contains(&id) || data.is_empty() {
@@ -509,7 +502,10 @@ impl WorkspaceApp {
             }
         }
         if let Some(e) = self.pump.last_error() {
-            self.status = format!("ipc: {e}");
+            self.status = format!("ipc: {e} (reconnecting)");
+        }
+        if self.pump.take_resync() {
+            self.resync_terminals();
         }
     }
 
@@ -561,8 +557,8 @@ impl WorkspaceApp {
     }
 
     fn set_file_root(&mut self, root: PathBuf, persist: bool) {
-        self.file_root_edit = pworkspaces::files::display_path(&root);
-        self.file_index = pworkspaces::files::list_rel_paths(&root);
+        self.file_root_edit = pmux::files::display_path(&root);
+        self.file_index = pmux::files::list_rel_paths(&root);
         self.file_root = Some(root.clone());
         if persist {
             match self
@@ -572,7 +568,7 @@ impl WorkspaceApp {
                 Ok(s) => {
                     self.status = format!(
                         "root → {}",
-                        pworkspaces::files::display_path(std::path::Path::new(&s))
+                        pmux::files::display_path(std::path::Path::new(&s))
                     );
                 }
                 Err(e) => self.status = format!("root: {e}"),
@@ -581,12 +577,12 @@ impl WorkspaceApp {
     }
 
     fn apply_file_root_edit(&mut self) {
-        let path = pworkspaces::files::expand_path(&self.file_root_edit);
+        let path = pmux::files::expand_path(&self.file_root_edit);
         if path.is_dir() {
             self.set_file_root(path, true);
             self.palette_index = 0;
         } else if let Some(cur) = &self.file_root {
-            self.file_root_edit = pworkspaces::files::display_path(cur);
+            self.file_root_edit = pmux::files::display_path(cur);
         }
     }
 
@@ -599,7 +595,7 @@ impl WorkspaceApp {
 
     fn open_quick_file(&mut self, rel: &str) {
         let abs = match &self.file_root {
-            Some(root) => pworkspaces::files::abs_path(root, rel).display().to_string(),
+            Some(root) => pmux::files::abs_path(root, rel).display().to_string(),
             None => rel.to_string(),
         };
         let result = self.client.open_view(&self.ws_key(), &abs);
@@ -725,6 +721,7 @@ impl WorkspaceApp {
             self.hydrate_pending.insert(id.clone());
         }
         self.status = format!("refresh ← replay ({} term)", ids.len());
+        self.hydrate_inflight.clear();
     }
 
     fn sync_view_sources(&mut self) {
@@ -786,7 +783,7 @@ impl WorkspaceApp {
             items
         };
         let file_items = if files_mode {
-            pworkspaces::files::search(&self.file_index, &self.palette_query, 80)
+            pmux::files::search(&self.file_index, &self.palette_query, 80)
         } else {
             Vec::new()
         };
@@ -1088,6 +1085,10 @@ impl eframe::App for WorkspaceApp {
                         }
                     }
                     egui::Event::Text(text) => {
+                        // Skip CR/LF/TAB: already sent via Event::Key (Enter/Tab).
+                        if text.chars().all(|c| matches!(c, '\n' | '\r' | '\t')) {
+                            continue;
+                        }
                         pty_bytes.push(text.as_bytes().to_vec());
                     }
                     _ => {}
@@ -1185,8 +1186,8 @@ impl eframe::App for WorkspaceApp {
 
                 if let Some((idx, border)) = hovered {
                     let cursor = match border.direction {
-                        pworkspaces::layout::Direction::Horizontal => egui::CursorIcon::ResizeHorizontal,
-                        pworkspaces::layout::Direction::Vertical => egui::CursorIcon::ResizeVertical,
+                        pmux::layout::Direction::Horizontal => egui::CursorIcon::ResizeHorizontal,
+                        pmux::layout::Direction::Vertical => egui::CursorIcon::ResizeVertical,
                     };
                     mouse_actions.push(MouseAction::SetCursor(cursor));
 
@@ -1201,10 +1202,10 @@ impl eframe::App for WorkspaceApp {
                         if let Some(border) = self.split_borders.get(drag_idx) {
                             let parent = border.parent_rect;
                             let new_ratio = match border.direction {
-                                pworkspaces::layout::Direction::Horizontal => {
+                                pmux::layout::Direction::Horizontal => {
                                     (pos.x - parent.left()) / parent.width()
                                 }
-                                pworkspaces::layout::Direction::Vertical => {
+                                pmux::layout::Direction::Vertical => {
                                     (pos.y - parent.top()) / parent.height()
                                 }
                             };
@@ -1214,8 +1215,8 @@ impl eframe::App for WorkspaceApp {
                             });
                             // Keep cursor during drag
                             let cursor = match border.direction {
-                                pworkspaces::layout::Direction::Horizontal => egui::CursorIcon::ResizeHorizontal,
-                                pworkspaces::layout::Direction::Vertical => egui::CursorIcon::ResizeVertical,
+                                pmux::layout::Direction::Horizontal => egui::CursorIcon::ResizeHorizontal,
+                                pmux::layout::Direction::Vertical => egui::CursorIcon::ResizeVertical,
                             };
                             mouse_actions.push(MouseAction::SetCursor(cursor));
                         }
@@ -1616,13 +1617,13 @@ impl WorkspaceApp {
 
                 // Compute the border rect between the two children
                 let border_rect = match direction {
-                    pworkspaces::layout::Direction::Horizontal => {
+                    pmux::layout::Direction::Horizontal => {
                         egui::Rect::from_min_max(
                             egui::pos2(first_rect.right(), rect.top()),
                             egui::pos2(second_rect.left(), rect.bottom()),
                         )
                     }
-                    pworkspaces::layout::Direction::Vertical => {
+                    pmux::layout::Direction::Vertical => {
                         egui::Rect::from_min_max(
                             egui::pos2(rect.left(), first_rect.bottom()),
                             egui::pos2(rect.right(), second_rect.top()),
@@ -1758,15 +1759,9 @@ impl WorkspaceApp {
                     });
                 }
             }
-            let ws = self.ws_key();
-            let _ = self.client.resize_pty(
-                &ws,
-                pane_id.as_str(),
-                fit_cols as u16,
-                fit_lines as u16,
-            );
-            hydrate_terminal(&self.client, &mut self.components, &ws, pane_id.as_str());
-            self.hydrate_pending.remove(pane_id);
+            if self.hydrate_inflight.insert(pane_id.clone()) {
+                self.pump.hydrate_pty(pane_id.as_str(), fit_cols as u16, fit_lines as u16);
+            }
         } else if let Some(tc) = self.components.get_terminal_mut(pane_id) {
             if tc.cols() != fit_cols || tc.lines() != fit_lines {
                 tc.input(ComponentInput::Resize { cols: fit_cols, lines: fit_lines });
@@ -2286,8 +2281,8 @@ impl WorkspaceApp {
     fn render_grid(
         ui: &mut egui::Ui,
         content_rect: egui::Rect,
-        cells: &[pworkspaces::terminal::RenderableCell],
-        cursor: &pworkspaces::terminal::CursorState,
+        cells: &[pmux::terminal::RenderableCell],
+        cursor: &pmux::terminal::CursorState,
         cols: usize,
         lines: usize,
         is_focused: bool,
@@ -2378,9 +2373,9 @@ impl WorkspaceApp {
     fn render_lines(
         ui: &mut egui::Ui,
         content_rect: egui::Rect,
-        header: Option<&pworkspaces::component::StyledLine>,
-        subheader: Option<&pworkspaces::component::StyledLine>,
-        lines: &[pworkspaces::component::StyledLine],
+        header: Option<&pmux::component::StyledLine>,
+        subheader: Option<&pmux::component::StyledLine>,
+        lines: &[pmux::component::StyledLine],
     ) {
         let painter = ui.painter();
         let font = egui::FontId::monospace(FONT_SIZE);
@@ -2594,7 +2589,7 @@ impl Drop for WorkspaceApp {
                 } else {
                     eprintln!(
                         "detached — runtime alive at {}",
-                        pworkspaces::ipc::socket_path().display()
+                        pmux::ipc::socket_path().display()
                     );
                 }
             }
@@ -2605,7 +2600,7 @@ impl Drop for WorkspaceApp {
                 let _ = self.client.save();
                 eprintln!(
                     "detached — runtime alive at {}",
-                    pworkspaces::ipc::socket_path().display()
+                    pmux::ipc::socket_path().display()
                 );
             }
         }
@@ -2614,11 +2609,11 @@ impl Drop for WorkspaceApp {
 
 fn split_rect(
     rect: egui::Rect,
-    direction: pworkspaces::layout::Direction,
+    direction: pmux::layout::Direction,
     ratio: f32,
     gap: f32,
 ) -> (egui::Rect, egui::Rect) {
-    use pworkspaces::layout::Direction;
+    use pmux::layout::Direction;
 
     match direction {
         Direction::Horizontal => {

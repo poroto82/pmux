@@ -1,25 +1,20 @@
+//! Client library: IPC, attach, terminal paint.
+//!
+//! Window: crate `pmux-ui` (`ui/egui`, bin `pmux`). Runtime: `pmux-runtime` (`pwctl`).
+
 pub mod action;
+pub mod attach;
 pub mod component;
-pub mod daemon;
-pub mod event;
 pub mod files;
 pub mod ids;
 pub mod ipc;
 pub mod ipc_client;
-pub mod ipc_server;
 pub mod layout;
 pub mod markdown;
 pub mod monitor;
-pub mod names;
 pub mod palette;
-pub mod pane;
 pub mod paths;
-pub mod permission;
-pub mod persistence;
-pub mod runtime;
-pub mod session;
 pub mod terminal;
+pub mod token;
 pub mod view;
-pub mod watch;
 pub mod widgets;
-pub mod workspace;

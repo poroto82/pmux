@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
-use crate::action::{ActionContext, ActionRegistry, ActionResult};
-use crate::component::ComponentRegistry;
+use pmux::action::{ActionContext, ActionRegistry, ActionResult};
+use pmux::component::ComponentRegistry;
+use pmux::files;
+use pmux::ids::{ComponentId, PaneId, SessionId, WorkspaceId};
+use pmux::ipc;
+use pmux::layout::Direction;
+use pmux::monitor::{self, ListenPort};
+
 use crate::event::{Event, EventBus};
-use crate::files;
-use crate::ids::{ComponentId, PaneId, SessionId, WorkspaceId};
-use crate::ipc;
-use crate::layout::Direction;
-use crate::monitor::{self, ListenPort};
 use crate::names;
 use crate::permission::{AccessRequest, AuthResult, Authorization, Permission};
 use crate::persistence::PersistenceManager;
@@ -87,15 +88,15 @@ impl Runtime {
 
     /// SIGTERM + force next port poll (UI kill / plugin action).
     pub fn kill_listen_pid(&mut self, pid: u32) -> Result<(), String> {
-        crate::monitor::kill_pid(pid).map_err(|e| e.to_string())?;
+        monitor::kill_pid(pid).map_err(|e| e.to_string())?;
         self.port_watch.force();
         self.tick_watchers();
         Ok(())
     }
 
     /// UI frame snapshot (daemon → UI).
-    pub fn ui_snapshot(&self, workspace_key: Option<&str>) -> crate::ipc::UiSnapshot {
-        use crate::ipc::{FloatSnap, PaneSnap, UiSnapshot, WorkspaceTabSnap};
+    pub fn ui_snapshot(&self, workspace_key: Option<&str>) -> ipc::UiSnapshot {
+        use ipc::{FloatSnap, PaneSnap, UiSnapshot, WorkspaceTabSnap};
 
         let active_id = self.workspaces.active_id().cloned();
         let mut tabs: Vec<WorkspaceTabSnap> = self
@@ -1157,8 +1158,7 @@ impl Runtime {
             .insert("PW_WORKSPACE_NAME", &ws.name)
             .insert("PW_PANE_ID", pane.id.as_str())
             .insert("PMUX_SOCK", &sock)
-            .insert("PWORKSPACES_SOCK", &sock)
-            .insert("PATH", crate::paths::path_with_pwctl());
+            .insert("PATH", pmux::paths::path_with_pwctl());
 
         if let Some(name) = &pane.name {
             env = env.insert("PW_PANE_NAME", name);

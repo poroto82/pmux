@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ComponentId, PaneId, SessionId, WorkspaceId};
+use pmux::ids::{ComponentId, PaneId, SessionId, WorkspaceId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pane {

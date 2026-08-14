@@ -12,9 +12,9 @@ Each terminal session exports:
 | `PW_WORKSPACE_NAME` | Human workspace name |
 | `PW_PANE_ID` | Stable pane id (`pane_…`) |
 | `PW_PANE_NAME` | Human pane name (auto: `caffeinated_turing` style) |
-| `PMUX_SOCK` | Unix socket for `pwctl` (`PWORKSPACES_SOCK` alias) |
+| `PMUX_SOCK` | Unix socket for `pwctl` |
 
-Use skill `pworkspaces-agent` (`.claude/skills/` / `.cursor/skills/`) or:
+Use skill `pmux-agent` (`.claude/skills/` / `.cursor/skills/`) or:
 
 ```bash
 pwctl panes "$PW_WORKSPACE_NAME"
@@ -27,24 +27,25 @@ Args accept name **or** id.
 
 ## Dev binaries
 
-Runtime crate (lib + `pwctl`). Desktop UI lives in `ui/egui` (swap later → `ui/<toolkit>`).
+Runtime crate (`runtime/`, bin `pwctl`). Desktop UI lives in `ui/egui` (crate `pmux-ui`, bin `pmux`). Shared lib: `src/` (`pmux`).
 
 ```bash
 cargo build --bin pwctl                                    # runtime
-cargo build -p pmux                                            # UI
+cargo build -p pmux-ui                                     # UI
 cargo pmux                                                 # run UI (alias)
 # inside a pane, pwctl is on PATH (next to the bin + ~/.cargo/bin)
 
 # host shell (optional):
-cargo install --path . --bin pwctl
+cargo install --path runtime --bin pwctl
 pwctl panes "$PW_WORKSPACE_NAME"
 ```
 
 Layout:
 
 ```text
-src/           # runtime lib + pwctl
-ui/egui/       # egui/eframe frontend (bin: pmux)
+src/           # lib `pmux` (IPC, attach, VTE paint) — no PTY
+runtime/       # daemon + PTY + pwctl
+ui/egui/       # crate `pmux-ui`, bin `pmux`
 ```
 
 ## Runtime / attach
@@ -53,6 +54,7 @@ Un solo runtime (daemon) en `/tmp/pmux.sock`. UI y `pwctl` son clientes.
 
 ```bash
 pwctl start              # solo daemon (sin ventana; no hace falta binario UI)
+# LAN: pwctl start imprime token; Mac: PMUX_HOST=ip:7878 PMUX_TOKEN=… cargo pmux
 cargo pmux               # UI: attach; si no hay daemon, spawnea pwctl --daemon
 pwctl ping
 pwctl stop               # mata daemon + PTYs

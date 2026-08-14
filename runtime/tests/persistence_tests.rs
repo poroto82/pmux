@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 
-use pworkspaces::ids::ComponentId;
-use pworkspaces::layout::Direction;
-use pworkspaces::persistence::PersistenceManager;
-use pworkspaces::workspace::WorkspaceRegistry;
+use pmux::ids::ComponentId;
+use pmux::layout::Direction;
+use pmux_runtime::persistence::PersistenceManager;
+use pmux_runtime::workspace::WorkspaceRegistry;
 
 fn comp() -> ComponentId {
     ComponentId::new()
 }
 
 fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pworkspaces_test_{}", ulid::Ulid::new()));
+    let dir = std::env::temp_dir().join(format!("pmux_test_{}", ulid::Ulid::new()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

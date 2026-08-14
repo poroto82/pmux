@@ -21,10 +21,16 @@ Hace falta [Rust](https://rustup.rs) (stable). **Runtime y UI se buildean aparte
 cargo build --release --bin pwctl
 
 # UI (ventana) — máquina con display
-cargo build --release -p pmux
+cargo build --release -p pmux-ui
 ```
 
-`cargo build --release` (sin args) = solo runtime.
+`cargo build --release` (sin args) = client lib + `pwctl` (sin ventana).
+
+```
+src/        lib `pmux` (IPC, attach, paint) — sin PTY
+runtime/    `pmux-runtime` + pwctl
+ui/egui/    crate `pmux-ui`, bin `pmux`
+```
 
 Bins:
 
@@ -43,7 +49,7 @@ cargo pmux                 # alias → run UI
 `pwctl` en PATH (host):
 
 ```bash
-cargo install --path . --bin pwctl
+cargo install --path runtime --bin pwctl
 hash -r
 ```
 
@@ -68,7 +74,7 @@ UI: GTK + WebKit **y una mono**. Sin fuente, egui cae al default y se ve mal.
 ```bash
 sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
   fonts-jetbrains-mono fonts-dejavu-core
-cargo build --release -p pmux
+cargo build --release -p pmux-ui
 ```
 
 Orden que busca `pmux` (primera que exista):
@@ -180,6 +186,32 @@ pwctl view spec.md
 ```
 
 En un pane el runtime exporta `PW_WORKSPACE_ID`, `PW_WORKSPACE_NAME`, `PW_PANE_ID`, `PW_PANE_NAME`, `PMUX_SOCK`.
+
+## LAN (TCP + token)
+
+Sin SSH. Tráfico **sin TLS** — solo en red de confianza. Quien tenga el token tipea en tus shells.
+
+En el runtime:
+
+```bash
+pwctl start            # genera token si no hay, lo imprime
+# pwctl start --rotate # token nuevo (daemon tiene que estar down)
+pwctl token            # mostrar
+```
+
+Default: `0.0.0.0:7878`. Off: `listen = "off"` en `pmux.toml` o `PMUX_LISTEN=off`.
+
+En la Mac (misma LAN):
+
+```bash
+export PMUX_HOST=192.168.x.x:7878
+export PMUX_TOKEN=<el token de pwctl start>
+cargo pmux
+# o
+pwctl ping
+```
+
+Unix sock local **no** pide token.
 
 ## Remoto (SSH)
 

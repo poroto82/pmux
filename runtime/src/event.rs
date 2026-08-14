@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ids::{PaneId, SessionId, WorkspaceId};
+use pmux::ids::{PaneId, SessionId, WorkspaceId};
 
 /// All events in the system.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

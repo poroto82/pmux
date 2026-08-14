@@ -1,12 +1,12 @@
 use std::thread;
 use std::time::Duration;
 
-use pworkspaces::ids::ComponentId;
-use pworkspaces::layout::Direction;
-use pworkspaces::runtime::Runtime;
+use pmux::ids::ComponentId;
+use pmux::layout::Direction;
+use pmux_runtime::runtime::Runtime;
 
 fn temp_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pworkspaces_rt_test_{}", ulid::Ulid::new()));
+    let dir = std::env::temp_dir().join(format!("pmux_rt_test_{}", ulid::Ulid::new()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -70,7 +70,7 @@ fn switch_workspace() {
 
 #[test]
 fn cycle_workspace_next_prev() {
-    use pworkspaces::action::ActionContext;
+    use pmux::action::ActionContext;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -91,7 +91,7 @@ fn cycle_workspace_next_prev() {
 
 #[test]
 fn new_workspace_gets_unique_name() {
-    use pworkspaces::action::ActionContext;
+    use pmux::action::ActionContext;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -179,7 +179,7 @@ fn tick_watchers_emits_port_opened_on_first_poll() {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
-    use pworkspaces::event::EventKind;
+    use pmux_runtime::event::EventKind;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -365,7 +365,7 @@ fn send_command_no_session() {
 fn events_fire_on_operations() {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-    use pworkspaces::event::EventKind;
+    use pmux_runtime::event::EventKind;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -389,7 +389,7 @@ fn events_fire_on_operations() {
 fn events_scoped_to_workspace() {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-    use pworkspaces::event::EventKind;
+    use pmux_runtime::event::EventKind;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -646,7 +646,7 @@ fn default_actions_registered() {
 
 #[test]
 fn execute_split_horizontal_creates_pane() {
-    use pworkspaces::action::ActionContext;
+    use pmux::action::ActionContext;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -688,7 +688,7 @@ fn open_view_reuses_pane_and_sets_source() {
 
 #[test]
 fn agent_authorized_within_workspace() {
-    use pworkspaces::permission::PermissionSet;
+    use pmux_runtime::permission::PermissionSet;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -714,7 +714,7 @@ fn agent_authorized_within_workspace() {
 
 #[test]
 fn agent_denied_cross_workspace() {
-    use pworkspaces::permission::PermissionSet;
+    use pmux_runtime::permission::PermissionSet;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -728,7 +728,7 @@ fn agent_denied_cross_workspace() {
     let result = rt.send_command_as("claude", &frontend, &pane, "echo HACK");
     assert!(result.is_err());
     match result {
-        Err(pworkspaces::runtime::RuntimeError::PermissionDenied(_)) => {}
+        Err(pmux_runtime::runtime::RuntimeError::PermissionDenied(_)) => {}
         other => panic!("expected PermissionDenied, got {:?}", other),
     }
 
@@ -737,7 +737,7 @@ fn agent_denied_cross_workspace() {
 
 #[test]
 fn agent_denied_missing_permission() {
-    use pworkspaces::permission::PermissionSet;
+    use pmux_runtime::permission::PermissionSet;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -817,7 +817,7 @@ fn runtime_tile_pane() {
 fn runtime_float_emits_event() {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-    use pworkspaces::event::EventKind;
+    use pmux_runtime::event::EventKind;
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -849,7 +849,7 @@ fn runtime_float_emits_event() {
 
 #[test]
 fn runtime_float_with_auth() {
-    use pworkspaces::permission::{Permission, PermissionSet};
+    use pmux_runtime::permission::{Permission, PermissionSet};
 
     let dir = temp_dir();
     let mut rt = Runtime::new(&dir);
@@ -883,7 +883,7 @@ fn runtime_float_nonexistent_workspace() {
     let ws_id = rt.create_workspace("backend");
     let p1 = rt.add_pane(&ws_id, comp(), None, false).unwrap();
 
-    let fake_ws = pworkspaces::ids::WorkspaceId::new();
+    let fake_ws = pmux::ids::WorkspaceId::new();
     assert!(!rt.float_pane(&fake_ws, &p1, 0.0, 0.0, 400.0, 300.0));
 
     cleanup(&dir);

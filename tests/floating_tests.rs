@@ -1,5 +1,5 @@
-use pworkspaces::ids::PaneId;
-use pworkspaces::layout::{Direction, LayoutTree};
+use pmux::ids::PaneId;
+use pmux::layout::{Direction, LayoutTree};
 
 fn pane() -> PaneId {
     PaneId::new()
