@@ -2,12 +2,14 @@
 
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
-use std::sync::Mutex;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::action::ActionInfo;
 use crate::ipc::{
-    self, ActionOutcome, Request, Response, UiSnapshot,
+    self, ActionOutcome, PollInput, PollResize, PollUiData, Request, Response, UiSnapshot,
 };
 
 #[derive(Debug)]
@@ -111,6 +113,19 @@ impl IpcClient {
     pub fn snapshot(&self, workspace: Option<&str>) -> Result<UiSnapshot, IpcError> {
         self.ok_data(Request::Snapshot {
             workspace: workspace.map(|s| s.to_string()),
+        })
+    }
+
+    pub fn poll_ui(
+        &self,
+        workspace: Option<&str>,
+        inputs: Vec<PollInput>,
+        resizes: Vec<PollResize>,
+    ) -> Result<PollUiData, IpcError> {
+        self.ok_data(Request::PollUi {
+            workspace: workspace.map(|s| s.to_string()),
+            inputs,
+            resizes,
         })
     }
 
@@ -321,4 +336,141 @@ impl IpcClient {
             Ok(Response::Error { message }) => Err(IpcError::Remote(message)),
         }
     }
+}
+
+enum PumpCmd {
+    Input { pane: String, bytes: Vec<u8> },
+    Resize { pane: String, cols: u16, rows: u16 },
+}
+
+struct PumpState {
+    snap: UiSnapshot,
+    outputs: Vec<(String, Vec<u8>)>,
+    err: Option<String>,
+}
+
+/// Background IPC: one `poll_ui` RTT per tick (keys + resize + snapshot + PTY bytes).
+/// Keeps the egui thread off the SSH round-trip.
+pub struct IpcPump {
+    state: Arc<Mutex<PumpState>>,
+    tx: mpsc::Sender<PumpCmd>,
+}
+
+impl IpcPump {
+    pub fn start(initial: UiSnapshot) -> Result<Self, IpcError> {
+        let client = IpcClient::connect()?;
+        let _ = client
+            .writer
+            .lock()
+            .ok()
+            .map(|s| s.set_read_timeout(Some(Duration::from_secs(3))));
+        let (tx, rx) = mpsc::channel();
+        let state = Arc::new(Mutex::new(PumpState {
+            snap: initial,
+            outputs: Vec::new(),
+            err: None,
+        }));
+        let st = state.clone();
+        thread::Builder::new()
+            .name("pmux-ipc-pump".into())
+            .spawn(move || pump_loop(client, rx, st))
+            .map_err(|e| IpcError::Io(e))?;
+        Ok(Self { state, tx })
+    }
+
+    pub fn send_input(&self, _workspace: &str, pane: &str, bytes: &[u8]) {
+        let _ = self.tx.send(PumpCmd::Input {
+            pane: pane.into(),
+            bytes: bytes.to_vec(),
+        });
+    }
+
+    pub fn resize_pty(&self, _workspace: &str, pane: &str, cols: u16, rows: u16) {
+        let _ = self.tx.send(PumpCmd::Resize {
+            pane: pane.into(),
+            cols,
+            rows,
+        });
+    }
+
+    pub fn take_snap(&self) -> UiSnapshot {
+        self.state.lock().unwrap().snap.clone()
+    }
+
+    pub fn take_outputs(&self) -> Vec<(String, Vec<u8>)> {
+        std::mem::take(&mut self.state.lock().unwrap().outputs)
+    }
+
+    pub fn last_error(&self) -> Option<String> {
+        self.state.lock().unwrap().err.clone()
+    }
+}
+
+fn pump_loop(
+    client: IpcClient,
+    rx: mpsc::Receiver<PumpCmd>,
+    state: Arc<Mutex<PumpState>>,
+) {
+    loop {
+        let mut inputs: Vec<PollInput> = Vec::new();
+        let mut resizes: Vec<PollResize> = Vec::new();
+        match rx.recv_timeout(Duration::from_millis(16)) {
+            Ok(cmd) => apply_cmd(cmd, &mut inputs, &mut resizes),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok(cmd) = rx.try_recv() {
+            apply_cmd(cmd, &mut inputs, &mut resizes);
+        }
+        coalesce_inputs(&mut inputs);
+
+        let ws = state.lock().unwrap().snap.active_id.clone();
+        match client.poll_ui(ws.as_deref(), inputs, resizes) {
+            Ok(data) => {
+                let mut st = state.lock().unwrap();
+                st.snap = data.snapshot;
+                for o in data.outputs {
+                    if !o.bytes.is_empty() {
+                        st.outputs.push((o.pane, o.bytes));
+                    }
+                }
+                st.err = None;
+            }
+            Err(e) => {
+                state.lock().unwrap().err = Some(e.to_string());
+                thread::sleep(Duration::from_millis(80));
+            }
+        }
+    }
+}
+
+fn apply_cmd(cmd: PumpCmd, inputs: &mut Vec<PollInput>, resizes: &mut Vec<PollResize>) {
+    match cmd {
+        PumpCmd::Input { pane, bytes } => inputs.push(PollInput { pane, bytes }),
+        PumpCmd::Resize { pane, cols, rows } => {
+            if let Some(r) = resizes.iter_mut().find(|r| r.pane == pane) {
+                r.cols = cols;
+                r.rows = rows;
+            } else {
+                resizes.push(PollResize { pane, cols, rows });
+            }
+        }
+    }
+}
+
+fn coalesce_inputs(inputs: &mut Vec<PollInput>) {
+    if inputs.len() < 2 {
+        return;
+    }
+    let mut merged: Vec<PollInput> = Vec::new();
+    for inp in inputs.drain(..) {
+        if let Some(last) = merged.last_mut() {
+            if last.pane == inp.pane {
+                last.bytes.extend_from_slice(&inp.bytes);
+                continue;
+            }
+        }
+        merged.push(inp);
+    }
+    *inputs = merged;
 }

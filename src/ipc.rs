@@ -110,6 +110,16 @@ pub enum Request {
         workspace: Option<String>,
     },
 
+    /// One round-trip for a UI frame: optional input/resize, then snapshot + drained PTY bytes.
+    PollUi {
+        #[serde(default)]
+        workspace: Option<String>,
+        #[serde(default)]
+        inputs: Vec<PollInput>,
+        #[serde(default)]
+        resizes: Vec<PollResize>,
+    },
+
     /// Raw PTY bytes (keys, paste). `bytes` is a JSON array of u8.
     SendInput {
         workspace: String,
@@ -283,6 +293,32 @@ pub struct FloatSnap {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollInput {
+    pub pane: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollResize {
+    pub pane: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneBytes {
+    pub pane: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollUiData {
+    pub snapshot: UiSnapshot,
+    #[serde(default)]
+    pub outputs: Vec<PaneBytes>,
 }
 
 /// Layout + panes + ports for one UI frame.

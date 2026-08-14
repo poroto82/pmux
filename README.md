@@ -51,11 +51,11 @@ Adentro de un pane, `pwctl` ya está en PATH (al lado del bin + `~/.cargo/bin`).
 
 ### macOS
 
-Xcode CLT + Rust. Nada más. UI y runtime.
+Xcode CLT + Rust. La UI usa Menlo del sistema (`/System/Library/Fonts/Menlo.ttc`). Opcional: [JetBrainsMono Nerd Font](https://www.nerdfonts.com/font-downloads) en `~/Library/Fonts/` (iconos en la terminal).
 
 ### Linux / WSL2
 
-Solo runtime (recomendado para attach remoto):
+Solo runtime (recomendado para attach remoto): **no hace falta fuente ni GTK.**
 
 ```bash
 sudo apt install build-essential
@@ -63,11 +63,32 @@ cargo build --release --bin pwctl
 ./target/release/pwctl start
 ```
 
-UI en Linux (opcional): GTK + WebKit.
+UI: GTK + WebKit **y una mono**. Sin fuente, egui cae al default y se ve mal.
 
 ```bash
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
+  fonts-jetbrains-mono fonts-dejavu-core
 cargo build --release -p pmux
+```
+
+Orden que busca `pmux` (primera que exista):
+
+| Path |
+|------|
+| `~/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf` |
+| `~/.local/share/fonts/JetBrainsMonoNerdFont-Regular.ttf` (o `.otf`) |
+| `/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf` |
+| `/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf` |
+| `/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf` |
+| `/System/Library/Fonts/Menlo.ttc` |
+
+Nerd Font a mano:
+
+```bash
+mkdir -p ~/.local/share/fonts
+# bajá JetBrainsMonoNerdFont-Regular.ttf de https://www.nerdfonts.com/font-downloads
+cp JetBrainsMonoNerdFont-Regular.ttf ~/.local/share/fonts/
+fc-cache -fv
 ```
 
 ### Windows
@@ -102,6 +123,27 @@ pwctl stop
 ```
 
 Socket: `/tmp/pmux.sock` (override `$PMUX_SOCK`). Layout: `~/.config/pmux/`.
+
+### Theme
+
+Default: **caffeine** (café muteado). Ya **no** se copia el tema de Kitty — el Monokai de `kitty.conf` era el neon.
+
+`~/.config/pmux/pmux.toml`:
+
+```toml
+# caffeine | kitty | theme.conf | ~/path/to.conf
+theme = "caffeine"
+```
+
+O `$PMUX_THEME`. Para tunear: copiá `themes/caffeine.conf` → `~/.config/pmux/theme.conf` (sintaxis Kitty: `color0`…`color15`, `foreground`, `background`, `cursor`, `active_border_color`).
+
+```bash
+cp themes/caffeine.conf ~/.config/pmux/theme.conf
+# en pmux.toml:
+theme = "theme.conf"
+```
+
+Para volver a Kitty: `theme = "kitty"`. Reiniciá la UI (el palette se carga al arrancar).
 
 ### Teclas
 
@@ -141,16 +183,33 @@ En un pane el runtime exporta `PW_WORKSPACE_ID`, `PW_WORKSPACE_NAME`, `PW_PANE_I
 
 ## Remoto (SSH)
 
-El daemon ya es un servidor local. Tunelás el sock:
+El daemon es un servidor local. Tunelás el sock.
+
+**Importante:** reconstruí `pwctl` en el server. El UI ahora hace **un** RPC por tick (`poll_ui`); el daemon viejo no lo entiende.
 
 ```bash
-# en el server (WSL / lab): solo runtime
-pwctl start
-ssh -N -L /tmp/pmux-lab.sock:/tmp/pmux.sock user@lab
-PMUX_SOCK=/tmp/pmux-lab.sock pmux
+# server (WSL / lab)
+cargo build --release --bin pwctl
+./target/release/pwctl stop
+./target/release/pwctl start
+
+# Mac — unix-forward, sin compresión (suma latencia)
+rm -f /tmp/pmux-wsl.sock
+ssh -N -o Compression=no -o IPQoS=throughput \
+  -L /tmp/pmux-wsl.sock:/tmp/pmux.sock USER@HOST
 ```
 
-Sin `PMUX_SOCK` la laptop arranca un daemon **local**. Dos UIs al mismo runtime se pisan el output en vivo (un buffer); attach de a una, o ⌘⇧R para resync.
+Otra terminal:
+
+```bash
+export PMUX_SOCK=/tmp/pmux-wsl.sock
+pwctl ping
+cargo pmux
+```
+
+Sin `PMUX_SOCK` la Mac arranca daemon local. WSL2 + Windows extra hop se siente; si podés, SSH directo al Linux (IP de WSL), no al Windows.
+
+El teclado y el PTY van en el mismo round-trip. Igual no es local: RTT de SSH ≈ delay al tipear.
 
 ## Layout del repo
 

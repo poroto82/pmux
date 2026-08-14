@@ -41,7 +41,7 @@ pub fn ensure_running() -> io::Result<()> {
 
     let exe = daemon_bin()?;
     let log = {
-        let _ = fs::create_dir_all(paths::config_dir());
+        paths::ensure_config_scaffold();
         fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -76,7 +76,7 @@ pub fn run() -> ! {
         std::process::exit(0);
     }
 
-    let _ = fs::create_dir_all(paths::config_dir());
+    paths::ensure_config_scaffold();
     let _ = fs::remove_file(crate::ipc::socket_path());
     if let Ok(pid) = fs::File::create(pid_path()) {
         let _ = writeln!(&pid, "{}", std::process::id());

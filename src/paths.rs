@@ -5,6 +5,38 @@ use std::path::PathBuf;
 const APP: &str = "pmux";
 const LEGACY_APP: &str = "pworkspaces";
 
+/// `~/.config/pmux/pmux.toml`
+pub fn config_file() -> PathBuf {
+    config_dir().join("pmux.toml")
+}
+
+/// `~/.config/pmux/theme.conf` (kitty color syntax).
+pub fn theme_file() -> PathBuf {
+    config_dir().join("theme.conf")
+}
+
+/// Write a commented `pmux.toml` the first time config dir is created.
+pub fn ensure_config_scaffold() {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let toml = config_file();
+    if toml.exists() {
+        return;
+    }
+    let _ = std::fs::write(
+        toml,
+        "# pmux\n\
+         #\n\
+         # theme = caffeine   # bundled, muted (default)\n\
+         # theme = kitty      # follow ~/.config/kitty/kitty.conf\n\
+         # theme = theme.conf # ~/.config/pmux/theme.conf (kitty color syntax)\n\
+         # theme = ~/path/to.conf\n\
+         #\n\
+         # Or set $PMUX_THEME. Copy themes/caffeine.conf → theme.conf to tweak.\n\
+         theme = \"caffeine\"\n",
+    );
+}
+
 /// `~/.config/pmux`, or leftover `~/.config/pworkspaces` if that still has data.
 pub fn config_dir() -> PathBuf {
     let Some(base) = xdg_config_home() else {

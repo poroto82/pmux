@@ -1,7 +1,8 @@
-//! Terminal color palette.
+//! Terminal + chrome palette.
 //!
-//! Loads `~/.config/kitty/kitty.conf` (+ `include`s) so ANSI 16 + default
-//! fg/bg match Kitty. Fallback: generic dark 16-color.
+//! Default: bundled **caffeine** (muted coffee). Override:
+//!   `$PMUX_THEME` → `~/.config/pmux/pmux.toml` `theme` → `theme.conf` → caffeine
+//! Spec: `caffeine` | `kitty` | path to a kitty-syntax `.conf`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -27,44 +28,51 @@ impl TermColor {
     }
 }
 
-/// Full terminal palette (ANSI 16 + defaults).
+/// Full terminal palette (ANSI 16 + defaults + chrome).
 #[derive(Debug, Clone)]
 pub struct TermPalette {
     pub colors: [TermColor; 16],
     pub foreground: TermColor,
     pub background: TermColor,
     pub cursor: TermColor,
+    pub selection: TermColor,
     pub active_border: TermColor,
     pub inactive_border: TermColor,
 }
 
 impl TermPalette {
-    pub fn fallback() -> Self {
+    /// Muted coffee — default when nothing is configured.
+    pub fn caffeine() -> Self {
         Self {
             colors: [
-                TermColor::new(0, 0, 0),
-                TermColor::new(204, 4, 3),
-                TermColor::new(25, 203, 0),
-                TermColor::new(206, 203, 0),
-                TermColor::new(13, 115, 204),
-                TermColor::new(203, 30, 209),
-                TermColor::new(13, 205, 205),
-                TermColor::new(221, 221, 221),
-                TermColor::new(118, 118, 118),
-                TermColor::new(242, 32, 31),
-                TermColor::new(35, 253, 0),
-                TermColor::new(255, 253, 0),
-                TermColor::new(26, 143, 255),
-                TermColor::new(253, 40, 255),
-                TermColor::new(20, 255, 255),
-                TermColor::new(255, 255, 255),
+                TermColor::new(0x2a, 0x29, 0x26),
+                TermColor::new(0xc4, 0x5c, 0x4a),
+                TermColor::new(0x8a, 0x9a, 0x62),
+                TermColor::new(0xc9, 0xa8, 0x6c),
+                TermColor::new(0x6a, 0x84, 0x94),
+                TermColor::new(0xa0, 0x7a, 0x8c),
+                TermColor::new(0x7a, 0x94, 0x8c),
+                TermColor::new(0xd0, 0xcc, 0xc0),
+                TermColor::new(0x6e, 0x6a, 0x62),
+                TermColor::new(0xd4, 0x78, 0x68),
+                TermColor::new(0xa0, 0xb0, 0x78),
+                TermColor::new(0xd4, 0xbc, 0x84),
+                TermColor::new(0x82, 0xa0, 0xb0),
+                TermColor::new(0xb8, 0x94, 0xa4),
+                TermColor::new(0x94, 0xac, 0xa4),
+                TermColor::new(0xec, 0xe8, 0xdc),
             ],
-            foreground: TermColor::new(221, 221, 221),
-            background: TermColor::new(0, 0, 0),
-            cursor: TermColor::new(221, 221, 221),
-            active_border: TermColor::new(42, 212, 163),
-            inactive_border: TermColor::new(18, 18, 18),
+            foreground: TermColor::new(0xc8, 0xc4, 0xb8),
+            background: TermColor::new(0x1c, 0x1b, 0x19),
+            cursor: TermColor::new(0xc8, 0xc4, 0xb8),
+            selection: TermColor::new(0x3a, 0x38, 0x34),
+            active_border: TermColor::new(0xa8, 0x98, 0x68),
+            inactive_border: TermColor::new(0x3a, 0x38, 0x34),
         }
+    }
+
+    pub fn fallback() -> Self {
+        Self::caffeine()
     }
 
     pub fn ansi(&self, idx: u8) -> TermColor {
@@ -99,13 +107,69 @@ impl TermPalette {
 
 static PALETTE: OnceLock<TermPalette> = OnceLock::new();
 
-/// Process-wide palette (Kitty theme if present).
+/// Process-wide palette.
 pub fn global() -> &'static TermPalette {
-    PALETTE.get_or_init(|| {
-        kitty_config_path()
+    PALETTE.get_or_init(load_configured)
+}
+
+fn load_configured() -> TermPalette {
+    let spec = std::env::var("PMUX_THEME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(theme_from_toml)
+        .unwrap_or_else(|| {
+            if crate::paths::theme_file().is_file() {
+                "theme.conf".into()
+            } else {
+                "caffeine".into()
+            }
+        });
+    load_theme_spec(&spec)
+}
+
+fn theme_from_toml() -> Option<String> {
+    let text = std::fs::read_to_string(crate::paths::config_file()).ok()?;
+    for raw in text.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        let rest = line.strip_prefix("theme")?;
+        let rest = rest.trim().strip_prefix('=')?.trim();
+        let val = rest
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
+/// `caffeine` | `kitty` | path (relative to `~/.config/pmux` unless absolute / `~/`).
+pub fn load_theme_spec(spec: &str) -> TermPalette {
+    let spec = spec.trim();
+    if spec.eq_ignore_ascii_case("caffeine") {
+        return TermPalette::caffeine();
+    }
+    if spec.eq_ignore_ascii_case("kitty") {
+        return kitty_config_path()
             .and_then(|p| load_kitty_file(&p).ok())
-            .unwrap_or_else(TermPalette::fallback)
-    })
+            .unwrap_or_else(TermPalette::caffeine);
+    }
+    let path = resolve_theme_path(spec);
+    load_kitty_file(&path).unwrap_or_else(|_| TermPalette::caffeine())
+}
+
+fn resolve_theme_path(spec: &str) -> PathBuf {
+    if let Some(rest) = spec.strip_prefix("~/") {
+        return dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(rest);
+    }
+    let p = PathBuf::from(spec);
+    if p.is_absolute() {
+        return p;
+    }
+    crate::paths::config_dir().join(spec)
 }
 
 fn kitty_config_path() -> Option<PathBuf> {
@@ -118,7 +182,7 @@ fn kitty_config_path() -> Option<PathBuf> {
 
 /// Load a kitty.conf (and recursive `include`s).
 pub fn load_kitty_file(path: &Path) -> Result<TermPalette, std::io::Error> {
-    let mut pal = TermPalette::fallback();
+    let mut pal = TermPalette::caffeine();
     let mut seen = HashSet::new();
     load_kitty_into(&mut pal, path, &mut seen, 0)?;
     Ok(pal)
@@ -182,8 +246,9 @@ fn apply_kitty_text(
             "foreground" => pal.foreground = color,
             "background" => pal.background = color,
             "cursor" => pal.cursor = color,
-            "active_border_color" => pal.active_border = color,
-            "inactive_border_color" => pal.inactive_border = color,
+            "selection_background" => pal.selection = color,
+            "active_border_color" | "active_tab_background" => pal.active_border = color,
+            "inactive_border_color" | "inactive_tab_background" => pal.inactive_border = color,
             _ => {}
         }
     }
@@ -297,6 +362,32 @@ mod tests {
         assert_eq!(pal.colors[2], TermColor::new(0xa6, 0xe2, 0x2e));
         assert_eq!(pal.cursor, TermColor::new(0xf8, 0xf8, 0xf2));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn caffeine_is_muted_not_vga() {
+        let pal = TermPalette::caffeine();
+        assert!(pal.colors[2].g < 200, "green should not be neon");
+        assert!(pal.colors[6].b < 220, "cyan should not be neon");
+        assert_eq!(pal.background, TermColor::new(0x1c, 0x1b, 0x19));
+    }
+
+    #[test]
+    fn load_theme_spec_caffeine() {
+        let pal = load_theme_spec("caffeine");
+        assert_eq!(pal.foreground, TermPalette::caffeine().foreground);
+    }
+
+    #[test]
+    fn load_theme_spec_file() {
+        let dir = std::env::temp_dir().join(format!("pw-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("mine.conf");
+        std::fs::write(&conf, "background #111111\ncolor2 #445533\n").unwrap();
+        let pal = load_theme_spec(&conf.display().to_string());
+        assert_eq!(pal.background, TermColor::new(0x11, 0x11, 0x11));
+        assert_eq!(pal.colors[2], TermColor::new(0x44, 0x55, 0x33));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

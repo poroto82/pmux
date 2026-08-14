@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use eframe::egui;
+use pworkspaces::action::ActionInfo;
 use pworkspaces::component::{Component, ComponentInput, ComponentRegistry, RenderOutput};
 use pworkspaces::ids::{PaneId, WorkspaceId};
 use pworkspaces::ipc::{PaneSnap, UiSnapshot};
-use pworkspaces::ipc_client::IpcClient;
+use pworkspaces::ipc_client::{IpcClient, IpcPump};
 use pworkspaces::layout::LayoutNode;
 use pworkspaces::palette;
 use pworkspaces::terminal::TermColor;
@@ -18,6 +19,8 @@ fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--daemon") {
         pworkspaces::daemon::run();
     }
+
+    pworkspaces::paths::ensure_config_scaffold();
 
     pworkspaces::paths::ensure_pwctl_built();
     let already = pworkspaces::ipc_client::IpcClient::ping();
@@ -64,9 +67,12 @@ fn main() -> eframe::Result {
             visuals.override_text_color = Some(text());
             visuals.widgets.noninteractive.bg_fill = bg_title();
             visuals.widgets.inactive.bg_fill = bg_title();
-            visuals.selection.bg_fill = egui::Color32::from_rgba_unmultiplied(42, 212, 163, 70);
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+            visuals.selection.bg_fill = {
+                let s = palette::global().selection;
+                egui::Color32::from_rgba_unmultiplied(s.r, s.g, s.b, 120)
+            };
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent());
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent());
             visuals.window_stroke = egui::Stroke::NONE;
             cc.egui_ctx.set_visuals(visuals);
             cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
@@ -128,6 +134,7 @@ struct SplitBorder {
 
 struct WorkspaceApp {
     client: IpcClient,
+    pump: IpcPump,
     snap: UiSnapshot,
     /// All visual components indexed by PaneId.
     components: ComponentRegistry,
@@ -158,6 +165,8 @@ struct WorkspaceApp {
     palette_query: String,
     palette_index: usize,
     palette_focus_search: bool,
+    palette_cache_q: Option<String>,
+    palette_cache: Vec<ActionInfo>,
     file_root: Option<PathBuf>,
     file_root_edit: String,
     file_index: Vec<String>,
@@ -221,18 +230,24 @@ window.pmux = {
 window.pworkspaces = window.pmux;
 "#;
 
-/// Kitty-ish chrome: mint active border. Pane fill follows Kitty theme bg.
-const FOCUSED_BORDER: egui::Color32 = egui::Color32::from_rgb(42, 212, 163);
-/// macOS traffic-light inset when content draws under the titlebar.
+/// Kitty-ish chrome: borders follow the loaded theme.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHTS_W: f32 = 76.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHTS_W: f32 = 0.0;
-const NORMAL_BORDER: egui::Color32 = egui::Color32::from_rgb(18, 18, 18);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(42, 212, 163);
 
 fn tc(c: TermColor) -> egui::Color32 {
     egui::Color32::from_rgb(c.r, c.g, c.b)
+}
+
+fn accent() -> egui::Color32 {
+    tc(palette::global().active_border)
+}
+fn focused_border() -> egui::Color32 {
+    accent()
+}
+fn normal_border() -> egui::Color32 {
+    tc(palette::global().inactive_border)
 }
 
 fn bg_app() -> egui::Color32 {
@@ -345,6 +360,7 @@ impl WorkspaceApp {
     fn new() -> Self {
         let client = IpcClient::connect().expect("connect to pmux daemon");
         let snap = client.snapshot(None).expect("daemon snapshot");
+        let pump = IpcPump::start(snap.clone()).expect("ipc pump");
         let mut components = ComponentRegistry::new();
         components.load_plugins();
 
@@ -369,6 +385,7 @@ impl WorkspaceApp {
 
         Self {
             client,
+            pump,
             snap,
             components,
             active_ws: ws_id,
@@ -387,6 +404,8 @@ impl WorkspaceApp {
             palette_query: String::new(),
             palette_index: 0,
             palette_focus_search: false,
+            palette_cache_q: None,
+            palette_cache: Vec::new(),
             file_root: None,
             file_root_edit: String::new(),
             file_index: Vec::new(),
@@ -474,26 +493,23 @@ fn hydrate_terminal(
 }
 
 impl WorkspaceApp {
-    fn poll_outputs(&mut self) {
-        let ws = self.ws_key();
-        let pane_ids: Vec<PaneId> = self
-            .snap
-            .panes
-            .iter()
-            .filter(|p| p.component_type == "terminal")
-            .map(|p| PaneId::from_raw(p.id.clone()))
-            .collect();
-        for pane_id in &pane_ids {
-            if self.hydrate_pending.contains(pane_id) {
+    fn pull_pump(&mut self) {
+        let snap = self.pump.take_snap();
+        if let Some(id) = snap.active_id.as_deref() {
+            self.active_ws = WorkspaceId::from_raw(id);
+        }
+        self.snap = snap;
+        for (pane, data) in self.pump.take_outputs() {
+            let id = PaneId::from_raw(pane);
+            if self.hydrate_pending.contains(&id) || data.is_empty() {
                 continue;
             }
-            if let Ok(data) = self.client.read_output(&ws, pane_id.as_str()) {
-                if !data.is_empty() {
-                    if let Some(comp) = self.components.get_terminal_mut(pane_id) {
-                        comp.process(&data);
-                    }
-                }
+            if let Some(comp) = self.components.get_terminal_mut(&id) {
+                comp.process(&data);
             }
+        }
+        if let Some(e) = self.pump.last_error() {
+            self.status = format!("ipc: {e}");
         }
     }
 
@@ -501,8 +517,7 @@ impl WorkspaceApp {
         let Some(focused) = self.snap.focused.as_deref().map(PaneId::from_raw) else {
             return;
         };
-        let _ = self
-            .client
+        self.pump
             .send_input(&self.ws_key(), focused.as_str(), data);
         if let Some(comp) = self.components.get_mut(&focused) {
             comp.input(ComponentInput::KeyBytes(data.to_vec()));
@@ -529,6 +544,7 @@ impl WorkspaceApp {
         self.palette_query.clear();
         self.palette_index = 0;
         self.palette_focus_search = true;
+        self.palette_cache_q = None;
     }
 
     fn open_file_palette(&mut self) {
@@ -758,10 +774,16 @@ impl WorkspaceApp {
 
         let command_items = if files_mode {
             Vec::new()
+        } else if self.palette_cache_q.as_deref() == Some(self.palette_query.as_str()) {
+            self.palette_cache.clone()
         } else {
-            self.client
+            let items = self
+                .client
                 .palette_items(&self.palette_query)
-                .unwrap_or_default()
+                .unwrap_or_default();
+            self.palette_cache_q = Some(self.palette_query.clone());
+            self.palette_cache = items.clone();
+            items
         };
         let file_items = if files_mode {
             pworkspaces::files::search(&self.file_index, &self.palette_query, 80)
@@ -811,7 +833,7 @@ impl WorkspaceApp {
             .frame(
                 egui::Frame::popup(&ctx.style())
                     .fill(bg_pane())
-                    .stroke(egui::Stroke::new(1.0, ACCENT))
+                    .stroke(egui::Stroke::new(1.0, accent()))
                     .inner_margin(egui::Margin::same(10)),
             )
             .show(ctx, |ui| {
@@ -948,12 +970,11 @@ impl WorkspaceApp {
 
 impl eframe::App for WorkspaceApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.refresh_snap();
-        self.poll_outputs();
+        self.pull_pump();
         self.sync_components();
         self.sync_view_sources();
         self.view_slots.clear();
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
         ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
 
         let mut pending_action: Option<&'static str> = None;
@@ -1386,7 +1407,7 @@ impl eframe::App for WorkspaceApp {
                             }
 
                             let label = if *is_active {
-                                egui::RichText::new(name).strong().color(FOCUSED_BORDER)
+                                egui::RichText::new(name).strong().color(focused_border())
                             } else {
                                 egui::RichText::new(name).color(egui::Color32::from_rgb(170, 170, 180))
                             };
@@ -1642,7 +1663,7 @@ impl WorkspaceApp {
             .get(pane_id)
             .map(|s| s.as_str())
             .unwrap_or("terminal");
-        let border_color = if is_focused { FOCUSED_BORDER } else { NORMAL_BORDER };
+        let border_color = if is_focused { focused_border() } else { normal_border() };
         let border_width = if is_focused { 2.0 } else { 1.0 };
         let title_height = TITLE_H;
         let title_rect = egui::Rect::from_min_size(
@@ -1703,9 +1724,9 @@ impl WorkspaceApp {
             egui::Stroke::new(
                 1.0,
                 if is_focused {
-                    ACCENT
+                    accent()
                 } else {
-                    egui::Color32::from_rgb(22, 26, 34)
+                    normal_border()
                 },
             ),
         );
@@ -1749,7 +1770,7 @@ impl WorkspaceApp {
         } else if let Some(tc) = self.components.get_terminal_mut(pane_id) {
             if tc.cols() != fit_cols || tc.lines() != fit_lines {
                 tc.input(ComponentInput::Resize { cols: fit_cols, lines: fit_lines });
-                let _ = self.client.resize_pty(
+                self.pump.resize_pty(
                     &self.ws_key(),
                     pane_id.as_str(),
                     fit_cols as u16,
@@ -1891,7 +1912,7 @@ impl WorkspaceApp {
             painter.circle_filled(
                 title_rect.right_top() + egui::vec2(-14.0, 12.0),
                 4.0,
-                FOCUSED_BORDER,
+                focused_border(),
             );
         }
 
@@ -1980,7 +2001,7 @@ impl WorkspaceApp {
             };
             comp.sync_from(&rows, err.as_deref());
             if let Some(f) = comp.flash() {
-                ui.colored_label(ACCENT, f);
+                ui.colored_label(accent(), f);
             }
             if let Some(e) = comp.error() {
                 ui.colored_label(egui::Color32::from_rgb(239, 100, 100), e);
@@ -2033,7 +2054,7 @@ impl WorkspaceApp {
                 return;
             };
             if let Some(f) = comp.flash() {
-                ui.colored_label(ACCENT, f);
+                ui.colored_label(accent(), f);
             }
             if let Some(e) = comp.error() {
                 ui.colored_label(egui::Color32::from_rgb(239, 100, 100), e);
@@ -2102,7 +2123,7 @@ impl WorkspaceApp {
                 }
                 ui.label(
                     egui::RichText::new(job.status_text())
-                        .color(if running { ACCENT } else { text_dim() })
+                        .color(if running { accent() } else { text_dim() })
                         .small(),
                 );
             });

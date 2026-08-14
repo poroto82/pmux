@@ -52,6 +52,31 @@ fn snapshot_request_serde() {
 }
 
 #[test]
+fn poll_ui_request_serde() {
+    let json = serde_json::to_string(&Request::PollUi {
+        workspace: Some("demo".into()),
+        inputs: vec![pworkspaces::ipc::PollInput {
+            pane: "pane_1".into(),
+            bytes: b"x".to_vec(),
+        }],
+        resizes: vec![],
+    })
+    .unwrap();
+    let req: Request = serde_json::from_str(&json).unwrap();
+    match req {
+        Request::PollUi {
+            workspace,
+            inputs,
+            ..
+        } => {
+            assert_eq!(workspace.as_deref(), Some("demo"));
+            assert_eq!(inputs[0].bytes, b"x");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
 fn shutdown_and_send_input_serde() {
     let shutdown = serde_json::to_string(&Request::Shutdown).unwrap();
     assert!(shutdown.contains("shutdown"));

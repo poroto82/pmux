@@ -293,6 +293,51 @@ fn dispatch(rt: &mut Runtime, shutdown: Option<&AtomicBool>, req: Request) -> Re
             Response::ok_data(rt.ui_snapshot(workspace.as_deref()))
         }
 
+        Request::PollUi {
+            workspace,
+            inputs,
+            resizes,
+        } => {
+            let ws_key = workspace.or_else(|| {
+                rt.workspaces.active_id().map(|id| id.to_string())
+            });
+            let Some(ws_key) = ws_key else {
+                return Response::ok_data(ipc::PollUiData {
+                    snapshot: rt.ui_snapshot(None),
+                    outputs: Vec::new(),
+                });
+            };
+            for r in resizes {
+                if let Ok((ws, pane)) = resolve_pane(rt, &ws_key, &r.pane) {
+                    let _ = rt.resize_pty(&ws, &pane, r.cols, r.rows);
+                }
+            }
+            for inp in inputs {
+                if let Ok((ws, pane)) = resolve_pane(rt, &ws_key, &inp.pane) {
+                    let _ = rt.send_input(&ws, &pane, &inp.bytes);
+                }
+            }
+            let snapshot = rt.ui_snapshot(Some(&ws_key));
+            let mut outputs = Vec::new();
+            for pane in &snapshot.panes {
+                if pane.component_type != "terminal" {
+                    continue;
+                }
+                let Ok((ws, pid)) = resolve_pane(rt, &ws_key, &pane.id) else {
+                    continue;
+                };
+                if let Ok(data) = rt.read_output(&ws, &pid) {
+                    if !data.is_empty() {
+                        outputs.push(ipc::PaneBytes {
+                            pane: pane.id.clone(),
+                            bytes: data,
+                        });
+                    }
+                }
+            }
+            Response::ok_data(ipc::PollUiData { snapshot, outputs })
+        }
+
         Request::SendInput {
             workspace,
             pane,
