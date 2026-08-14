@@ -1,0 +1,17 @@
+[package]
+name = "pworkspaces-ui-egui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "pworkspaces"
+path = "src/main.rs"
+
+[dependencies]
+pworkspaces = { path = "../.." }
+eframe = "0.31"
+egui = "0.31"
+wry = "0.53"
+raw-window-handle = "0.6"
+dirs = "6"
