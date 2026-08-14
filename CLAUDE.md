@@ -30,9 +30,10 @@ Args accept name **or** id.
 Runtime crate (lib + `pwctl`). Desktop UI lives in `ui/egui` (swap later → `ui/<toolkit>`).
 
 ```bash
-cargo build --bin pmux --bin pwctl
-cargo run --bin pmux
-# inside a pane, pwctl is on PATH (next to pmux + ~/.cargo/bin)
+cargo build --bin pwctl                                    # runtime
+cargo build -p pmux                                            # UI
+cargo pmux                                                 # run UI (alias)
+# inside a pane, pwctl is on PATH (next to the bin + ~/.cargo/bin)
 
 # host shell (optional):
 cargo install --path . --bin pwctl
@@ -51,8 +52,8 @@ ui/egui/       # egui/eframe frontend (bin: pmux)
 Un solo runtime (daemon) en `/tmp/pmux.sock`. UI y `pwctl` son clientes.
 
 ```bash
-pwctl start              # solo daemon (sin ventana)
-cargo run --bin pmux     # UI: attach; si no hay daemon, lo arranca
+pwctl start              # solo daemon (sin ventana; no hace falta binario UI)
+cargo pmux               # UI: attach; si no hay daemon, spawnea pwctl --daemon
 pwctl ping
 pwctl stop               # mata daemon + PTYs
 ```

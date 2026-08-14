@@ -25,6 +25,10 @@ use pworkspaces::ipc::{self, PaneInfo, Request, Response, StatusInfo, WorkspaceI
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    if args.iter().any(|a| a == "--daemon") {
+        pworkspaces::daemon::run();
+    }
+
     if args.is_empty() {
         print_usage();
         std::process::exit(1);
@@ -73,7 +77,7 @@ fn main() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("cannot connect to runtime at {}: {}", path.display(), e);
-            eprintln!("is the daemon running? (`cargo run --bin pmux` or `pwctl ping`)");
+            eprintln!("is the daemon running? (`pwctl start` or `pwctl ping`)");
             std::process::exit(1);
         }
     };
@@ -283,38 +287,14 @@ fn resolve_path(path: &str) -> String {
         .to_string()
 }
 
-/// Start headless runtime (`pmux --daemon`) if ping fails.
+/// Start headless runtime (`pwctl --daemon`) if ping fails.
 fn start_daemon() -> Result<String, String> {
-    use std::process::{Command, Stdio};
-
-    if ping_ok() {
-        return Ok(format!(
-            "already running ({})",
-            ipc::socket_path().display()
-        ));
-    }
-
-    let exe = pworkspaces::paths::find_ui_bin().ok_or(
-        "cannot find `pmux` binary (build with: cargo build --bin pmux)".to_string(),
-    )?;
-
-    Command::new(&exe)
-        .arg("--daemon")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn {}: {e}", exe.display()))?;
-
-    for _ in 0..50 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        if ping_ok() {
-            return Ok(format!("started ({})", ipc::socket_path().display()));
-        }
-    }
-    Err(format!(
-        "daemon did not answer ping (tried {})",
-        exe.display()
+    let already = ping_ok();
+    pworkspaces::daemon::ensure_running().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "{} ({})",
+        if already { "already running" } else { "started" },
+        ipc::socket_path().display()
     ))
 }
 
@@ -413,6 +393,6 @@ Commands:
   view [<workspace>] <path>     Preview md/image in view pane
                                 (workspace optional if PW_WORKSPACE_NAME set)
 
-UI: `pmux` attaches (starts daemon if needed).
+UI: `pmux` attaches (starts `pwctl --daemon` if needed).
   ✕ / ⌘⇧D detach (keep runtime) · `pwctl stop` kills runtime.");
 }

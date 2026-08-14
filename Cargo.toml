@@ -1,6 +1,7 @@
 [workspace]
 members = [".", "ui/egui"]
-default-members = [".", "ui/egui"]
+# Runtime only. UI: `cargo build -p pmux`
+default-members = ["."]
 resolver = "2"
 
 [package]

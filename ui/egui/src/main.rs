@@ -54,34 +54,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
-
-            let nerd_font_path =
-                dirs::home_dir().unwrap().join("Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf");
-            if nerd_font_path.exists() {
-                if let Ok(data) = std::fs::read(&nerd_font_path) {
-                    fonts.font_data.insert(
-                        "nerd".to_owned(),
-                        std::sync::Arc::new(egui::FontData::from_owned(data)),
-                    );
-                    fonts
-                        .families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_default()
-                        .insert(0, "nerd".to_owned());
-                }
-            } else {
-                fonts.font_data.insert(
-                    "mono".to_owned(),
-                    std::sync::Arc::new(egui::FontData::from_static(
-                        include_bytes!("/System/Library/Fonts/Menlo.ttc"),
-                    )),
-                );
-                fonts
-                    .families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_default()
-                    .insert(0, "mono".to_owned());
-            }
+            load_mono_font(&mut fonts);
 
             cc.egui_ctx.set_fonts(fonts);
             let mut visuals = egui::Visuals::dark();
@@ -100,6 +73,34 @@ fn main() -> eframe::Result {
             Ok(Box::new(WorkspaceApp::new()))
         }),
     )
+}
+
+fn load_mono_font(fonts: &mut egui::FontDefinitions) {
+    let mut candidates = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf"));
+        candidates.push(home.join(".local/share/fonts/JetBrainsMonoNerdFont-Regular.ttf"));
+        candidates.push(home.join(".local/share/fonts/JetBrainsMonoNerdFont-Regular.otf"));
+    }
+    candidates.extend([
+        PathBuf::from("/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf"),
+        PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+        PathBuf::from("/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf"),
+        PathBuf::from("/System/Library/Fonts/Menlo.ttc"),
+    ]);
+    for path in candidates {
+        let Ok(data) = std::fs::read(&path) else { continue };
+        fonts.font_data.insert(
+            "mono".to_owned(),
+            std::sync::Arc::new(egui::FontData::from_owned(data)),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .insert(0, "mono".to_owned());
+        return;
+    }
 }
 
 /// Snapshot of floating pane position for rendering (no lock needed).

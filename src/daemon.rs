@@ -22,7 +22,13 @@ pub fn log_path() -> PathBuf {
     paths::config_dir().join("daemon.log")
 }
 
-/// Spawn `current_exe --daemon` if nothing answers Ping.
+fn daemon_bin() -> io::Result<PathBuf> {
+    paths::find_pwctl()
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot find pwctl or current exe"))
+}
+
+/// Spawn `pwctl --daemon` (fallback: current exe) if ping fails.
 /// Never unlinks the socket while a live daemon answers ping.
 pub fn ensure_running() -> io::Result<()> {
     if IpcClient::ping() {
@@ -33,7 +39,7 @@ pub fn ensure_running() -> io::Result<()> {
     let _ = fs::remove_file(crate::ipc::socket_path());
     let _ = fs::remove_file(pid_path());
 
-    let exe = std::env::current_exe()?;
+    let exe = daemon_bin()?;
     let log = {
         let _ = fs::create_dir_all(paths::config_dir());
         fs::OpenOptions::new()
@@ -63,7 +69,7 @@ pub fn ensure_running() -> io::Result<()> {
     ))
 }
 
-/// Foreground daemon loop (`pmux --daemon`).
+/// Foreground daemon loop (`pwctl --daemon` / `pmux --daemon`).
 pub fn run() -> ! {
     if IpcClient::ping() {
         eprintln!("pmux daemon already running");

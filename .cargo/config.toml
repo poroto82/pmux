@@ -1,0 +1,3 @@
+[alias]
+# UI lives in ui/egui; default `cargo build` is runtime-only.
+pmux = "run -p pmux"

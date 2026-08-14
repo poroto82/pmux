@@ -3219,6 +3219,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "pmux"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "eframe",
+ "egui",
+ "pworkspaces",
+ "raw-window-handle",
+ "wry",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3402,18 +3414,6 @@ dependencies = [
  "toml",
  "ulid",
  "url",
-]
-
-[[package]]
-name = "pworkspaces-ui-egui"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "eframe",
- "egui",
- "pworkspaces",
- "raw-window-handle",
- "wry",
 ]
 
 [[package]]

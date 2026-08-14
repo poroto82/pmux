@@ -56,6 +56,22 @@ pub fn bin_dir() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
+/// `pwctl` next to this exe, this exe if it *is* pwctl, or PATH.
+pub fn find_pwctl() -> Option<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.file_name().is_some_and(|n| n == "pwctl") {
+            return Some(exe);
+        }
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join("pwctl");
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+    }
+    which("pwctl")
+}
+
 /// UI binary (`pmux`, or leftover `pworkspaces`).
 pub fn find_ui_bin() -> Option<PathBuf> {
     if let Some(dir) = bin_dir() {

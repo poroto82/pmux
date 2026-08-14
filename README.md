@@ -14,26 +14,30 @@ Como tmux: el daemon es dueño de las sesiones. La UI es un cliente. `pwctl` tam
 
 ## Build
 
-Hace falta [Rust](https://rustup.rs) (stable).
+Hace falta [Rust](https://rustup.rs) (stable). **Runtime y UI se buildean aparte.**
 
 ```bash
-git clone <repo>
-cd pworkspaces          # o como se llame el dir
-cargo build --release --bin pmux --bin pwctl
+# runtime (daemon + pwctl) — WSL / server, sin GUI
+cargo build --release --bin pwctl
+
+# UI (ventana) — máquina con display
+cargo build --release -p pmux
 ```
+
+`cargo build --release` (sin args) = solo runtime.
 
 Bins:
 
 ```
-target/release/pmux     # ventana; arranca el daemon si no hay
-target/release/pwctl    # CLI
+target/release/pwctl    # CLI + daemon (`pwctl start` / `pwctl --daemon`)
+target/release/pmux     # ventana; si no hay daemon, spawnea pwctl
 ```
 
-Debug, día a día:
+Debug:
 
 ```bash
-cargo build --bin pmux --bin pwctl
-cargo run --bin pmux
+cargo run --bin pwctl -- start
+cargo pmux                 # alias → run UI
 ```
 
 `pwctl` en PATH (host):
@@ -43,19 +47,27 @@ cargo install --path . --bin pwctl
 hash -r
 ```
 
-Adentro de un pane, `pwctl` ya está en PATH (al lado de `pmux` + `~/.cargo/bin`).
+Adentro de un pane, `pwctl` ya está en PATH (al lado del bin + `~/.cargo/bin`).
 
 ### macOS
 
-Xcode CLT + Rust. Nada más.
+Xcode CLT + Rust. Nada más. UI y runtime.
 
-### Linux
+### Linux / WSL2
+
+Solo runtime (recomendado para attach remoto):
 
 ```bash
-# Debian / Ubuntu
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+sudo apt install build-essential
+cargo build --release --bin pwctl
+./target/release/pwctl start
+```
 
-cargo build --release --bin pmux --bin pwctl
+UI en Linux (opcional): GTK + WebKit.
+
+```bash
+sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+cargo build --release -p pmux
 ```
 
 ### Windows
@@ -69,10 +81,10 @@ Un comando:
 ```bash
 ./target/release/pmux
 # o
-cargo run --bin pmux
+cargo pmux
 ```
 
-Si no hay daemon, `pmux` lo spawnea (`pmux --daemon`) y se attacha.
+Si no hay daemon, `pmux` spawnea `pwctl --daemon` y se attacha.
 
 | Gesto | Efecto |
 |--------|--------|
@@ -132,7 +144,8 @@ En un pane el runtime exporta `PW_WORKSPACE_ID`, `PW_WORKSPACE_NAME`, `PW_PANE_I
 El daemon ya es un servidor local. Tunelás el sock:
 
 ```bash
-# en el server: pmux o pwctl start, una vez
+# en el server (WSL / lab): solo runtime
+pwctl start
 ssh -N -L /tmp/pmux-lab.sock:/tmp/pmux.sock user@lab
 PMUX_SOCK=/tmp/pmux-lab.sock pmux
 ```
