@@ -14,17 +14,19 @@ Como tmux: el daemon es dueño de las sesiones. La UI es un cliente. `pwctl` tam
 
 ## Build
 
-Hace falta [Rust](https://rustup.rs) (stable). **Runtime y UI se buildean aparte.**
+Hace falta [Rust](https://rustup.rs) (stable).
 
 ```bash
-# runtime (daemon + pwctl) — WSL / server, sin GUI
-cargo build --release --bin pwctl
-
-# UI (ventana) — máquina con display
-cargo build --release -p pmux-ui
+cargo build --release
+# → target/release/pwctl  (daemon + CLI)
+# → target/release/pmux   (ventana)
 ```
 
-`cargo build --release` (sin args) = client lib + `pwctl` (sin ventana).
+Solo runtime (WSL / server, sin deps de GUI):
+
+```bash
+cargo build --release --bin pwctl
+```
 
 ```
 src/        lib `pmux` (IPC, attach, paint) — sin PTY
@@ -59,6 +61,10 @@ Adentro de un pane, `pwctl` ya está en PATH (al lado del bin + `~/.cargo/bin`).
 
 Xcode CLT + Rust. La UI usa Menlo del sistema (`/System/Library/Fonts/Menlo.ttc`). Opcional: [JetBrainsMono Nerd Font](https://www.nerdfonts.com/font-downloads) en `~/Library/Fonts/` (iconos en la terminal).
 
+```bash
+cargo build --release
+```
+
 ### Linux / WSL2
 
 Solo runtime (recomendado para attach remoto): **no hace falta fuente ni GTK.**
@@ -69,12 +75,12 @@ cargo build --release --bin pwctl
 ./target/release/pwctl start
 ```
 
-UI: GTK + WebKit **y una mono**. Sin fuente, egui cae al default y se ve mal.
+UI (máquina con display): GTK + WebKit **y una mono**. Sin fuente, egui cae al default y se ve mal.
 
 ```bash
 sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
   fonts-jetbrains-mono fonts-dejavu-core
-cargo build --release -p pmux-ui
+cargo build --release
 ```
 
 Orden que busca `pmux` (primera que exista):

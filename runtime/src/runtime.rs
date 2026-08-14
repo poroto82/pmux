@@ -827,6 +827,7 @@ impl Runtime {
             "rename_workspace" => ActionResult::Ok,
             "detach" => ActionResult::Ok,
             "refresh_terminals" => ActionResult::Ok,
+            "connect_runtime" => ActionResult::Ok,
             "kill_runtime" => ActionResult::Ok,
             _ if name.starts_with("new_script:") => {
                 let script = name.trim_start_matches("new_script:");
@@ -1313,6 +1314,11 @@ impl Runtime {
             "refresh_terminals",
             "Re-hydrate terminals from runtime replay (second UI / desync)",
             Some("Ctrl+Shift+R"),
+        );
+        add(
+            "connect_runtime",
+            "Connect UI to a sock path or host:port (no terminal env needed)",
+            None,
         );
         add(
             "kill_runtime",

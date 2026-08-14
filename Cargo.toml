@@ -1,7 +1,8 @@
 [workspace]
 members = [".", "runtime", "ui/egui"]
-# Lib + pwctl. Window: `cargo pmux` / `cargo build -p pmux-ui`
-default-members = [".", "runtime"]
+# Plain `cargo build` / `cargo build --release` → lib + pwctl + UI (pmux).
+# Server/WSL sin GUI: `cargo build --release --bin pwctl`
+default-members = [".", "runtime", "ui/egui"]
 resolver = "2"
 
 [package]

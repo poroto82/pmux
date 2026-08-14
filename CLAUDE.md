@@ -30,9 +30,9 @@ Args accept name **or** id.
 Runtime crate (`runtime/`, bin `pwctl`). Desktop UI lives in `ui/egui` (crate `pmux-ui`, bin `pmux`). Shared lib: `src/` (`pmux`).
 
 ```bash
-cargo build --bin pwctl                                    # runtime
-cargo build -p pmux-ui                                     # UI
-cargo pmux                                                 # run UI (alias)
+cargo build --release          # pwctl + pmux (UI)
+cargo build --release --bin pwctl   # solo runtime (WSL / sin GUI)
+cargo pmux                     # run UI (alias)
 # inside a pane, pwctl is on PATH (next to the bin + ~/.cargo/bin)
 
 # host shell (optional):

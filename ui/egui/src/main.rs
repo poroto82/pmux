@@ -199,6 +199,8 @@ enum PaletteKind {
     Closed,
     Commands,
     Files,
+    /// Enter sock path or `host:port` → reattach UI (no shell env).
+    Connect,
 }
 
 impl PaletteKind {
@@ -556,6 +558,81 @@ impl WorkspaceApp {
         self.set_file_root(PathBuf::from(root), false);
     }
 
+    fn open_connect_palette(&mut self) {
+        self.palette_kind = PaletteKind::Connect;
+        self.palette_query = pmux::ipc::tcp_connect_addr().unwrap_or_else(|| {
+            pmux::ipc::socket_path().display().to_string()
+        });
+        self.palette_index = 0;
+        self.palette_focus_search = true;
+        self.palette_cache_q = None;
+    }
+
+    /// Switch this UI to another sock / TCP target without restarting from a shell.
+    fn reconnect_runtime(&mut self, raw: &str) {
+        match pmux::ipc::apply_client_target(raw) {
+            Ok(_) => {}
+            Err(e) => {
+                self.status = format!("connect: {e}");
+                return;
+            }
+        }
+        let client = match IpcClient::connect() {
+            Ok(c) => c,
+            Err(e) => {
+                self.status = format!("connect: {e}");
+                return;
+            }
+        };
+        let snap = match client.snapshot(None) {
+            Ok(s) => s,
+            Err(e) => {
+                self.status = format!("connect: {e}");
+                return;
+            }
+        };
+        let pump = match IpcPump::start(snap.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("connect: {e}");
+                return;
+            }
+        };
+
+        self.overlays.clear();
+        self.view_slots.clear();
+        self.hydrate_pending.clear();
+        self.hydrate_inflight.clear();
+        self.components = ComponentRegistry::new();
+        self.components.load_plugins();
+
+        for pane in &snap.panes {
+            install_pane_component(&mut self.components, pane);
+            if pane.component_type == "terminal" {
+                self.hydrate_pending
+                    .insert(PaneId::from_raw(pane.id.clone()));
+            }
+        }
+
+        let ws_id = snap
+            .active_id
+            .as_deref()
+            .map(WorkspaceId::from_raw)
+            .or_else(|| {
+                snap.workspaces
+                    .first()
+                    .map(|w| WorkspaceId::from_raw(w.id.clone()))
+            })
+            .unwrap_or_else(|| WorkspaceId::from_raw("ws_none"));
+
+        self.client = client;
+        self.pump = pump;
+        self.snap = snap;
+        self.active_ws = ws_id;
+        self.palette_cache_q = None;
+        self.status = format!("connected → {}", pmux::ipc::client_target_label());
+    }
+
     fn set_file_root(&mut self, root: PathBuf, persist: bool) {
         self.file_root_edit = pmux::files::display_path(&root);
         self.file_index = pmux::files::list_rel_paths(&root);
@@ -644,6 +721,10 @@ impl WorkspaceApp {
         }
         if name == "refresh_terminals" {
             self.resync_terminals();
+            return;
+        }
+        if name == "connect_runtime" {
+            self.open_connect_palette();
             return;
         }
         if name == "kill_runtime" {
@@ -761,6 +842,7 @@ impl WorkspaceApp {
         }
 
         let files_mode = self.palette_kind == PaletteKind::Files;
+        let connect_mode = self.palette_kind == PaletteKind::Connect;
         let screen = ctx.screen_rect();
         let dim_layer = egui::LayerId::new(egui::Order::Background, egui::Id::new("palette_dim"));
         ctx.layer_painter(dim_layer).rect_filled(
@@ -769,15 +851,22 @@ impl WorkspaceApp {
             egui::Color32::from_black_alpha(150),
         );
 
-        let command_items = if files_mode {
+        let command_items = if files_mode || connect_mode {
             Vec::new()
         } else if self.palette_cache_q.as_deref() == Some(self.palette_query.as_str()) {
             self.palette_cache.clone()
         } else {
-            let items = self
+            let mut items = self
                 .client
                 .palette_items(&self.palette_query)
                 .unwrap_or_default();
+            // Local UI action even if daemon list empty / old runtime.
+            ensure_local_palette_action(
+                &mut items,
+                &self.palette_query,
+                "connect_runtime",
+                "Connect UI to a sock path or host:port (no terminal env needed)",
+            );
             self.palette_cache_q = Some(self.palette_query.clone());
             self.palette_cache = items.clone();
             items
@@ -789,6 +878,8 @@ impl WorkspaceApp {
         };
         let item_count = if files_mode {
             file_items.len()
+        } else if connect_mode {
+            0
         } else {
             command_items.len()
         };
@@ -800,10 +891,13 @@ impl WorkspaceApp {
 
         let mut run_name: Option<String> = None;
         let mut open_rel: Option<String> = None;
+        let mut connect_target: Option<String> = None;
         let mut close = false;
         let prev_query = self.palette_query.clone();
         let hint = if files_mode {
             "Open file…"
+        } else if connect_mode {
+            "Unix sock path or host:port  ·  Enter"
         } else {
             "Run action…"
         };
@@ -817,6 +911,11 @@ impl WorkspaceApp {
             } else {
                 "No matching files".into()
             }
+        } else if connect_mode {
+            format!(
+                "now: {}  ·  e.g. /tmp/pmux-wsl.sock  ·  10.0.0.5:7878",
+                pmux::ipc::client_target_label()
+            )
         } else {
             "No matching actions".into()
         };
@@ -826,7 +925,16 @@ impl WorkspaceApp {
             .resizable(false)
             .collapsible(false)
             .anchor(egui::Align2::CENTER_TOP, [0.0, 72.0])
-            .fixed_size([560.0, if files_mode { 380.0 } else { 340.0 }])
+            .fixed_size([
+                560.0,
+                if files_mode {
+                    380.0
+                } else if connect_mode {
+                    140.0
+                } else {
+                    340.0
+                },
+            ])
             .frame(
                 egui::Frame::popup(&ctx.style())
                     .fill(bg_pane())
@@ -872,14 +980,24 @@ impl WorkspaceApp {
                     if i.key_pressed(egui::Key::Escape) {
                         close = true;
                     }
-                    if i.key_pressed(egui::Key::ArrowDown) && item_count > 0 && !root_focused {
+                    if !connect_mode
+                        && i.key_pressed(egui::Key::ArrowDown)
+                        && item_count > 0
+                        && !root_focused
+                    {
                         self.palette_index = (self.palette_index + 1) % item_count;
                     }
-                    if i.key_pressed(egui::Key::ArrowUp) && item_count > 0 && !root_focused {
+                    if !connect_mode
+                        && i.key_pressed(egui::Key::ArrowUp)
+                        && item_count > 0
+                        && !root_focused
+                    {
                         self.palette_index = (self.palette_index + item_count - 1) % item_count;
                     }
                     if i.key_pressed(egui::Key::Enter) {
-                        if files_mode && root_focused {
+                        if connect_mode {
+                            connect_target = Some(self.palette_query.clone());
+                        } else if files_mode && root_focused {
                             commit_root = true;
                         } else if files_mode {
                             if let Some(rel) = file_items.get(self.palette_index) {
@@ -892,13 +1010,13 @@ impl WorkspaceApp {
                 });
 
                 egui::ScrollArea::vertical()
-                    .max_height(280.0)
+                    .max_height(if connect_mode { 40.0 } else { 280.0 })
                     .show(ui, |ui| {
-                        if item_count == 0 {
-                            ui.colored_label(text_dim(), empty_label);
-                            return;
-                        }
                         if files_mode {
+                            if item_count == 0 {
+                                ui.colored_label(text_dim(), empty_label);
+                                return;
+                            }
                             for (i, rel) in file_items.iter().enumerate() {
                                 let selected = i == self.palette_index;
                                 let rich = if selected {
@@ -917,6 +1035,10 @@ impl WorkspaceApp {
                                     open_rel = Some(rel.clone());
                                 }
                             }
+                        } else if connect_mode {
+                            ui.colored_label(text_dim(), empty_label);
+                        } else if item_count == 0 {
+                            ui.colored_label(text_dim(), empty_label);
                         } else {
                             for (i, item) in command_items.iter().enumerate() {
                                 let selected = i == self.palette_index;
@@ -958,11 +1080,39 @@ impl WorkspaceApp {
             self.open_quick_file(&rel);
             return;
         }
+        if let Some(target) = connect_target {
+            self.close_palette();
+            self.reconnect_runtime(&target);
+            return;
+        }
         if let Some(name) = run_name {
             self.close_palette();
             self.run_action(&name);
         }
     }
+}
+
+fn ensure_local_palette_action(
+    items: &mut Vec<ActionInfo>,
+    query: &str,
+    name: &str,
+    description: &str,
+) {
+    if items.iter().any(|i| i.name == name) {
+        return;
+    }
+    let q = query.trim().to_lowercase();
+    if !q.is_empty()
+        && !name.contains(&q)
+        && !description.to_lowercase().contains(&q)
+    {
+        return;
+    }
+    items.push(ActionInfo {
+        name: name.into(),
+        description: description.into(),
+        shortcut: None,
+    });
 }
 
 impl eframe::App for WorkspaceApp {

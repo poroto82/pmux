@@ -639,6 +639,7 @@ fn default_actions_registered() {
     assert!(rt.actions.has("rename_workspace"));
     assert!(rt.actions.has("detach"));
     assert!(rt.actions.has("refresh_terminals"));
+    assert!(rt.actions.has("connect_runtime"));
     assert!(rt.actions.has("kill_runtime"));
 
     cleanup(&dir);

@@ -45,6 +45,44 @@ pub fn tcp_connect_addr() -> Option<String> {
     parse_listen(&v)
 }
 
+/// Short label for status / palette (`sock /tmp/…` or `tcp host:port`).
+pub fn client_target_label() -> String {
+    if let Some(h) = tcp_connect_addr() {
+        format!("tcp {h}")
+    } else {
+        format!("sock {}", socket_path().display())
+    }
+}
+
+/// Point this process at a unix sock path or `host:port` (TCP).
+/// Sets `$PMUX_SOCK` or `$PMUX_HOST` for subsequent connects.
+pub fn apply_client_target(raw: &str) -> Result<String, String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Err("empty target".into());
+    }
+    if looks_like_host_port(t) {
+        let addr = parse_listen(t).ok_or_else(|| format!("bad host:port: {t}"))?;
+        std::env::set_var("PMUX_HOST", &addr);
+        std::env::remove_var("PMUX_SOCK");
+        std::env::remove_var("PWORKSPACES_SOCK");
+        return Ok(addr);
+    }
+    let path = crate::files::expand_path(t);
+    let s = path.display().to_string();
+    std::env::set_var("PMUX_SOCK", &s);
+    std::env::remove_var("PMUX_HOST");
+    Ok(s)
+}
+
+fn looks_like_host_port(s: &str) -> bool {
+    // Paths: absolute, home, relative, or any slash. Else host / host:port.
+    if s.starts_with('/') || s.starts_with('~') || s.starts_with('.') || s.contains('/') {
+        return false;
+    }
+    parse_listen(s).is_some()
+}
+
 pub(crate) fn parse_listen(raw: &str) -> Option<String> {
     let v = raw.trim();
     if v.is_empty()
